@@ -64,12 +64,12 @@ Remote keys therefore never reach Android or the web remote. The bridge fixes th
 
 | Remote key | Action (same as the page button) |
 |---|---|
-| UP / DOWN | `/key/up`, `/key/down` (channel ±1; in split: channel of the chosen side) |
+| UP / DOWN | `/key/up`, `/key/down`: move UP/DOWN the channel list as it is shown (UP = towards no. 1). In split: the chosen side |
 | LEFT / RIGHT | `/key/left`, `/key/right` (split: choose side) |
 | ENTER / KPENTER / SELECT | `/key/ok` |
 | BACK / ESC | `/key/back` |
 | HOMEPAGE | `/key/home` |
-| PAGEUP / CHANNELUP, PAGEDOWN / CHANNELDOWN | `/ch/next`, `/ch/prev` |
+| PAGEUP / CHANNELUP, PAGEDOWN / CHANNELDOWN | `/ch/prev`, `/ch/next` (same direction as the list) |
 | VOLUMEUP / VOLUMEDOWN / MUTE | `/vol/up`, `/vol/down`, `/vol/mute` (host volume on the HDMI sink) |
 
 - Actions are posted to `127.0.0.1` with `X-TV: 1` and logged as device **"Kumanda (fiziksel)"**, so the family
@@ -78,8 +78,13 @@ Remote keys therefore never reach Android or the web remote. The bridge fixes th
 - Key repeat: volume repeats; channel keys are throttled to one step per 0.35 s.
 - Hot-plug: the device list is rescanned every 5 s, so a re-plugged dongle is picked up.
 
-Reference notes say the OK key shows the on-screen channel name through mpv `show-text`; the code path is the
-same `/key/ok` as the page. ❔ Confirm by use.
+**On-TV channel list (`osd_now()`):** on every channel change and on OK, mpv `show-text` draws a short list
+with ASS tags: 2 channels above, the current one (yellow, bold, ▶), 3 below, numbered like the phone list; in split
+it shows the chosen side and sits on that half. Without it, people using only the physical remote cannot see what
+comes next. ✅ owner confirmed the bridge changes channels; direction fix + list ❔ (rendering checked with libass).
+
+Direction rule: UP must move up the list the user sees (no. 1 at the top). An earlier version used UP = next
+number, which felt inverted to the owner.
 
 ## 14.5 Verify (only when nobody is watching) ❔
 

@@ -38,7 +38,7 @@ for rule in "${RULES[@]}"; do
   IFS='|' read -r label re flags <<<"$rule"
   # re may itself contain '|' (alternation): rebuild it from the fields after the label
   re="${rule#*|}"; re="${re%|*}"; flags="${rule##*|}"
-  opts=(-rIn -E --exclude-dir=.git --exclude=privacy-scan.sh --exclude=privacy-patterns.local)
+  opts=(-rIn -E --exclude-dir=.git --exclude=privacy-scan.sh --exclude=privacy-patterns.local --exclude=sanitize-map.local)
   [ "$flags" = i ] && opts+=(-i)
   grep "${opts[@]}" -e "$re" "$ROOT" 2>/dev/null \
     | grep -v -- "$SELF" \

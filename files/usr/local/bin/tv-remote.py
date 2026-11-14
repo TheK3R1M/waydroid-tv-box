@@ -1009,23 +1009,39 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)state()});
 </script></body></html>"""
 
 
-def osd_now():
-    """Show what is playing on the TV itself (people using the physical remote have no phone screen)."""
+def _ass(t):
+    return str(t).replace("\\", "/").replace("{", "(").replace("}", ")").replace("$", "$$")
+
+
+def osd_now(ms=4000):
+    """Show a short channel list on the TV itself (people with the physical remote have no phone screen):
+    2 channels above, the current one highlighted, 3 below, in the same order as the phone list (no. 1 on top)."""
     try:
         chs = channels()
+        sd = _split["side"] if _split["mode"] == "split" else "left"
+        i = _want.get(sd)
+        if i is None:
+            src = _split["src"][sd]
+            i = src[1] if src and src[0] == "ch" else None
+        if i is None or not chs:
+            return mpv_ipc(["show-text", src_name(_split["src"][sd]), ms], timeout=1)
+        n = len(chs); i %= n
+        rows = []
+        for k in range(-2, 4):
+            j = (i + k) % n
+            name = _ass(chs[j][0])
+            if k == 0:
+                rows.append("{\\c&H00D7FF&\\alpha&H00&\\b1\\fs40}▶ %d. %s" % (j + 1, name))
+            else:
+                rows.append("{\\c&HFFFFFF&\\alpha&H50&\\b0\\fs32}     %d. %s" % (j + 1, name))
+        head = ""
         if _split["mode"] == "split":
-            sd = _split["side"]
-            i = _want.get(sd)
-            name = chs[i % len(chs)][0] if i is not None and chs else src_name(_split["src"][sd])
-            txt = ("◀ " if sd == "left" else "▶ ") + name
-        else:
-            i = _want.get("left")
-            txt = chs[i % len(chs)][0] if i is not None and chs else src_name(_split["src"]["left"])
-        if i is not None and chs:
-            txt = f"{i % len(chs) + 1}. {txt}" if _split["mode"] != "split" else txt
-        mpv_ipc(["show-text", txt, 2500], timeout=1)
-    except Exception:
-        pass
+            head = "{\\c&HFFFFFF&\\b1\\fs26}%s\\N" % ("SOL taraf" if sd == "left" else "SAĞ taraf")
+        al = "an6" if _split["mode"] == "split" and sd == "right" else "an4"   # list sits on the chosen half
+        txt = "${osd-ass-cc/0}{\\%s\\fs32\\bord3\\shad0}" % al + head + "\\N".join(rows)
+        mpv_ipc(["show-text", txt, ms], timeout=1)
+    except Exception as e:
+        print("osd:", e, flush=True)
 
 
 # Physical USB remote (air mouse) while a live channel plays: the fullscreen host mpv has keyboard focus and
@@ -1036,8 +1052,8 @@ REMOTE_MATCH = ("XING WEI 2.4G",)          # dongle name prefix(es) from /proc/b
 _BRIDGE_KEYS = {"KEY_UP": "/key/up", "KEY_DOWN": "/key/down", "KEY_LEFT": "/key/left", "KEY_RIGHT": "/key/right",
                 "KEY_ENTER": "/key/ok", "KEY_KPENTER": "/key/ok", "KEY_SELECT": "/key/ok",
                 "KEY_BACK": "/key/back", "KEY_ESC": "/key/back", "KEY_HOMEPAGE": "/key/home",
-                "KEY_PAGEUP": "/ch/next", "KEY_PAGEDOWN": "/ch/prev",
-                "KEY_CHANNELUP": "/ch/next", "KEY_CHANNELDOWN": "/ch/prev",
+                "KEY_PAGEUP": "/ch/prev", "KEY_PAGEDOWN": "/ch/next",          # same direction as the list on screen
+                "KEY_CHANNELUP": "/ch/prev", "KEY_CHANNELDOWN": "/ch/next",
                 "KEY_VOLUMEUP": "/vol/up", "KEY_VOLUMEDOWN": "/vol/down", "KEY_MUTE": "/vol/mute"}
 _REPEAT_OK = {"/vol/up", "/vol/down"}       # held volume repeats; held channel keys step every 0.35 s
 
@@ -1205,7 +1221,7 @@ class H(http.server.BaseHTTPRequestHandler):
             chs = channels()
             if parts[1] in ("up", "down") and chs:
                 sd = _split["side"] if _split["mode"] == "split" else "left"
-                i = (base_idx(sd) + (1 if parts[1] == "up" else -1)) % len(chs)
+                i = (base_idx(sd) + (-1 if parts[1] == "up" else 1)) % len(chs)   # ▲ = up the list (towards no. 1), like the phone list
                 _want[sd] = i; _ch["i"] = i
                 log_action(ip, f"kanal {chs[i][0]}")
                 ok = split_set(("ch", i), sd)
