@@ -1,0 +1,12 @@
+[Unit]
+Description=TV: AirPlay screen mirroring receiver (UxPlay) -> Weston fullscreen
+After=tv-weston.service tv-pipewire-pulse.service avahi-daemon.service network-online.target
+Requires=avahi-daemon.service
+BindsTo=tv-weston.service
+[Service]
+EnvironmentFile=/etc/tv/env
+ExecStart=/usr/bin/uxplay -n "Salon TV" -nh -p -pin __AIRPLAY_PIN__ -fs -vs "waylandsink fullscreen=true" -as pulsesink -reset 15
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

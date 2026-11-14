@@ -1,0 +1,30 @@
+# Never commit filled copies, secrets or generated files.
+# Work on a copy: cp -a <kit> <kit-filled> and fill the copy (tools/fill-placeholders.sh).
+*-filled/
+filled/
+.deploy.*/
+
+# certificates and keys
+*.pem
+*.key
+*.crt
+acme/
+tls/
+
+# environment, tokens, router and device data
+.env
+*.env
+devices.json
+turkiye.m3u
+turkiye.m3u.bak
+credentials*
+secrets*
+
+# python / editor / OS noise
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+tools/privacy-patterns.local

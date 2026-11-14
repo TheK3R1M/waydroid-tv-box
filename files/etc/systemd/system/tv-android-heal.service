@@ -1,0 +1,5 @@
+[Unit]
+Description=Heal frozen Waydroid app starts
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tv-android-heal.sh

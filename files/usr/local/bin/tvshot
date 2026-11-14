@@ -1,0 +1,4 @@
+#!/bin/sh
+# usage: tvshot.sh /tmp/out.jpg  -> real HDMI frame (what the TV shows)
+ffmpeg -loglevel error -y -device /dev/dri/card1 -f kmsgrab -i - -frames:v 1 \
+  -vf "hwmap=derive_device=vaapi,scale_vaapi=w=960:h=540:format=nv12,hwdownload,format=nv12" -q:v 4 "${1:-/tmp/tv.jpg}"

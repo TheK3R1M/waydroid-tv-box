@@ -1,0 +1,8 @@
+[Unit]
+Description=Bounce WiFi when gateway unreachable
+After=network-online.target
+[Service]
+ExecStart=/usr/local/bin/wifi-watchdog.sh
+Restart=always
+[Install]
+WantedBy=multi-user.target

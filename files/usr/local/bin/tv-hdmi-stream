@@ -1,0 +1,16 @@
+#!/bin/sh
+# Real HDMI output (what the TV shows: Android OR the host mpv) as H.264 MPEG-TS on stdout.
+# Used by the PC shortcut "TV Ekran (HDMI).bat": ssh pve-tv tv-hdmi-stream | ffplay -
+# GPU capture + VAAPI encode -> little CPU. Restarts after a plane/format change (channel switch, mpv<->Android).
+W=${1:-1280}; case "$W" in 1920|1280|960) ;; *) W=1280;; esac
+H=$((W*9/16))
+n=0
+while [ $n -lt 200 ] && kill -0 $PPID 2>/dev/null; do
+  n=$((n+1))
+  ffmpeg -hide_banner -loglevel error -device /dev/dri/card1 -f kmsgrab -framerate 30 -i - \
+    -vf "hwmap=derive_device=vaapi,scale_vaapi=w=$W:h=$H:format=nv12" \
+    -c:v h264_vaapi -b:v 4M -maxrate 6M -g 30 -bf 0 -f mpegts - || true
+  # viewer closed the window -> stdout is gone, stop
+  dd if=/dev/null of=/dev/stdout 2>/dev/null || exit 0
+  sleep 0.5
+done

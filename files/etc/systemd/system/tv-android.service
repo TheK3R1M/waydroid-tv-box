@@ -1,0 +1,14 @@
+[Unit]
+Description=TV: Waydroid Android TV session (fullscreen)
+Requires=waydroid-container.service tv-weston.service tv-wireplumber.service tv-pipewire-pulse.service
+After=waydroid-container.service tv-weston.service tv-wireplumber.service tv-pipewire-pulse.service
+[Service]
+EnvironmentFile=/etc/tv/env
+ExecStartPre=/bin/sh -c "for i in $(seq 1 30); do [ -S /run/tv/wayland-tv ] && exit 0; sleep 0.5; done; exit 1"
+ExecStart=/usr/bin/waydroid show-full-ui
+ExecStop=/usr/bin/waydroid session stop
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+[Install]
+WantedBy=multi-user.target

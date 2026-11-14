@@ -1,0 +1,102 @@
+# 14 · Physical remote (USB air mouse) and the live-TV bridge
+
+[← Index](../README.md) · [Checklist](../CHECKLIST.md) · [Agent entry point](../SKILL.md)
+
+Status legend: ✅ verified on the reference box · ❔ not verified / partly verified · ⚠️ danger.
+
+## 14.1 Why this exists
+
+The living-room TV has no CEC (see [§2.2 item 3](02-hardware.md)), so the TV's own remote cannot control the box.
+The reference build uses a cheap 2.4 GHz USB air-mouse remote with a dongle. It shows up as three Linux input
+devices: a keyboard interface, a mouse interface and a consumer-control interface.
+
+## 14.2 The power key shuts the box down ✅ (fixed)
+
+The remote's power key sends `KEY_POWER` on the consumer interface. systemd-logind treats it as "power off"
+and the box shut itself down (`journalctl -b -1`: "Power key pressed short. Powering off..."). The fix is a
+logind drop-in, shipped in the kit as `files/etc/systemd/logind.conf.d/10-tv-no-powerkey.conf`:
+
+```ini
+[Login]
+HandlePowerKey=ignore
+HandlePowerKeyLongPress=ignore
+HandleSuspendKey=ignore
+HandleSuspendKeyLongPress=ignore
+HandleHibernateKey=ignore
+HandleRebootKey=ignore
+HandleRebootKeyLongPress=ignore
+```
+
+Install and verify:
+
+```bash
+install -m 644 10-tv-no-powerkey.conf /etc/systemd/logind.conf.d/
+systemctl kill -s HUP systemd-logind
+busctl get-property org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager HandlePowerKey   # ignore
+```
+
+Rule: on any headless box, set this **before** you plug in a new USB remote or keyboard.
+Shut the box down from the Proxmox UI or the web remote's recovery button, never from the remote.
+
+## 14.3 Key map (from evtest) ✅
+
+| Input | Keys seen |
+|---|---|
+| keyboard interface (`event3`) | UP, DOWN, LEFT, RIGHT, ENTER, COMPOSE (menu), PAGEUP, PAGEDOWN |
+| mouse interface (`event4`) | pointer |
+| consumer interface (`event5`) | BACK, HOMEPAGE, VOLUMEUP, VOLUMEDOWN, MUTE, VOICECOMMAND |
+
+Find yours with `grep -A4 -i remote /proc/bus/input/devices` or `evtest` (read-only). Event numbers change
+between boots; the bridge matches by device name, not number.
+
+Many of these remotes also have a **learnable IR power key** (hold until the LED blinks, then teach it the
+TV's own remote). That gives TV on/off without CEC. ❔ Not tested on the reference box.
+
+## 14.4 The live-TV bridge in `tv-remote.py` ❔ (deployed; behaviour not recorded as verified)
+
+While the host mpv plays live TV, mpv is fullscreen and has keyboard focus (`--no-input-default-bindings`).
+Remote keys therefore never reach Android or the web remote. The bridge fixes that:
+
+- `_remote_bridge()` runs in a daemon thread. It opens the remote's evdev nodes **shared** (not grabbed), so
+  Weston still receives the keys. Devices are found by name prefix: `REMOTE_MATCH = ("XING WEI 2.4G",)`. Set this
+  to your own dongle's name (from `/proc/bus/input/devices`).
+- Keys are mapped to the same actions the web page sends (`_BRIDGE_KEYS`):
+
+| Remote key | Action (same as the page button) |
+|---|---|
+| UP / DOWN | `/key/up`, `/key/down` (channel ±1; in split: channel of the chosen side) |
+| LEFT / RIGHT | `/key/left`, `/key/right` (split: choose side) |
+| ENTER / KPENTER / SELECT | `/key/ok` |
+| BACK / ESC | `/key/back` |
+| HOMEPAGE | `/key/home` |
+| PAGEUP / CHANNELUP, PAGEDOWN / CHANNELDOWN | `/ch/next`, `/ch/prev` |
+| VOLUMEUP / VOLUMEDOWN / MUTE | `/vol/up`, `/vol/down`, `/vol/mute` (host volume on the HDMI sink) |
+
+- Actions are posted to `127.0.0.1` with `X-TV: 1` and logged as device **"Kumanda (fiziksel)"**, so the family
+  sees them in the audit log.
+- Only active while split/mpv is up (`_split["on"]`). Otherwise the bridge drops the key and Android handles it.
+- Key repeat: volume repeats; channel keys are throttled to one step per 0.35 s.
+- Hot-plug: the device list is rescanned every 5 s, so a re-plugged dongle is picked up.
+
+Reference notes say the OK key shows the on-screen channel name through mpv `show-text`; the code path is the
+same `/key/ok` as the page. ❔ Confirm by use.
+
+## 14.5 Verify (only when nobody is watching) ❔
+
+The bridge only runs while a channel plays, and a test changes the channel, so test when the family is not
+watching:
+
+1. `grep -c . /proc/bus/input/devices` and find the dongle name; set `REMOTE_MATCH` if it differs.
+2. Start a channel from the web remote, press UP once, and check `/var/log/tv-remote.log` for a
+   `Kumanda (fiziksel)` line. No line = the name prefix does not match, or the bridge thread died (check
+   `journalctl -u tv-remote`).
+3. Check that the channel changed on the HDMI output (`tvshot`), not only in the log.
+4. Volume: press VOLUMEUP, then VOLUMEDOWN, and read `/state` each time (restore the previous level).
+
+## 14.6 Ideas that were NOT built
+
+- A USB-CEC adapter would give real TV power control (`cec-ctl`), see [§2.2 item 3](02-hardware.md).
+- An on-screen keyboard for the physical remote (for "Yaz" without the phone) is open. Ask the owner first; do
+  not re-add automatic IME switching ([§7](07-adb.md)).
+
+Next: [§15 tv-guard](15-tv-guard.md) · Changes: [§16](16-changes-2026-11.md)

@@ -1,0 +1,11 @@
+[Unit]
+Description=TV: wireplumber
+BindsTo=tv-base.service
+After=tv-base.service tv-pipewire.service
+Requires=tv-pipewire.service
+[Service]
+EnvironmentFile=/etc/tv/env
+ExecStart=/usr/bin/wireplumber
+Restart=on-failure
+RestartSec=2
+ExecStartPost=/bin/sh -c "for i in 1 2 3 4 5 6 7 8 9 10; do pactl set-default-sink $TV_SINK && pactl set-sink-mute $TV_SINK 0 && pactl set-sink-volume $TV_SINK 85%% && exit 0; sleep 1; done; exit 0"

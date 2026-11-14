@@ -1,0 +1,5 @@
+[Unit]
+Description=TV guard: detect bot-like behaviour of Android apps and quarantine suspects
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/tv-guard-check.py

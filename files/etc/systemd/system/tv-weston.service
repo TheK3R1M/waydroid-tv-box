@@ -1,0 +1,9 @@
+[Unit]
+Description=TV: Weston kiosk on HDMI (DP-3)
+BindsTo=tv-base.service
+After=tv-base.service systemd-logind.service
+[Service]
+EnvironmentFile=/etc/tv/env
+ExecStart=/usr/bin/weston --backend=drm-backend.so --socket=wayland-tv -c /etc/tv/weston.ini --log=/run/tv/weston.log
+Restart=on-failure
+RestartSec=3

@@ -1,0 +1,10 @@
+[Unit]
+Description=TV: pipewire
+BindsTo=tv-base.service
+After=tv-base.service 
+
+[Service]
+EnvironmentFile=/etc/tv/env
+ExecStart=/usr/bin/pipewire
+Restart=on-failure
+RestartSec=2

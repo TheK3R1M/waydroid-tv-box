@@ -1,0 +1,5 @@
+XDG_RUNTIME_DIR=/run/tv
+WAYLAND_DISPLAY=wayland-tv
+DBUS_SESSION_BUS_ADDRESS=unix:path=/run/tv/bus
+PULSE_SERVER=unix:/run/tv/pulse/native
+TV_SINK=alsa_output.pci-0000_04_00.1.hdmi-stereo-extra3

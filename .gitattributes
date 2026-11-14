@@ -1,0 +1,5 @@
+# Line endings: LF in the repo for everything; Windows helpers keep CRLF (.bat/.ps1 need it).
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.png binary

@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover,interactive-widget=overlays-content">
+<meta name="theme-color" content="#0c0d10">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg">
+<title>TV Kumanda</title>
+<style>
+/* Surface: OPERATE — a physical remote. One screen, thumb-first, no scrolling, no tabs.
+   Layout height is locked (only changes on rotation / fullscreen), so the browser bar can't resize it. */
+:root{
+  --bg:#0c0d10;--s1:#16181d;--s2:#1f2229;--s3:#2a2e37;--ink:#eceef2;--mut:#8b91a0;--line:#262a32;
+  --acc:#4f7cff;--warn:#f2a33a;--bad:#e5484d;--ok:#3dd68c;
+  --ease:cubic-bezier(.23,1,.32,1);--drawer:cubic-bezier(.32,.72,0,1);
+  --H:100svh;--kb:0px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0}
+html,body{background:var(--bg);color:var(--ink);font:500 16px/1.25 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overscroll-behavior:none;touch-action:manipulation}
+body{position:fixed;inset:0;overflow:hidden;user-select:none;-webkit-user-select:none}
+button{font:inherit;color:inherit;background:var(--s2);border:0;border-radius:16px;cursor:pointer;touch-action:manipulation;transition:transform 120ms var(--ease),background-color 120ms}
+button:active,button.hit{transform:scale(.96);background:var(--s3)}
+svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+input{font:inherit;color:var(--ink);background:var(--s1);border:1px solid var(--line);border-radius:14px;padding:0 14px;height:50px;width:100%;outline:none;user-select:text;-webkit-user-select:text}
+input:focus{border-color:var(--acc)}
+
+#app{height:var(--H);display:grid;grid-template-rows:auto auto 1fr auto auto;gap:12px;
+  padding:calc(env(safe-area-inset-top) + 10px) 16px calc(env(safe-area-inset-bottom) + 14px)}
+
+#top{display:flex;align-items:center;gap:10px;min-height:28px}
+#dot{width:8px;height:8px;border-radius:50%;background:var(--bad);flex:none}
+#dot.on{background:var(--ok)}
+#now{flex:1;font-weight:650;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#who{color:var(--mut);font-size:12px;white-space:nowrap}
+
+#vol{display:grid;grid-template-columns:52px 1fr 52px 52px;gap:8px;align-items:center}
+#vol button{height:52px;display:flex;align-items:center;justify-content:center}
+#vbar{height:52px;border-radius:16px;background:var(--s1);position:relative;overflow:hidden;touch-action:none}
+#vfill{position:absolute;inset:0 auto 0 0;width:0;background:#24345f}
+#vfill.boost{background:#4d3a1c}
+#vnorm{position:absolute;top:10px;bottom:10px;width:2px;background:var(--mut);opacity:.5}
+#vtxt{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:700;font-variant-numeric:tabular-nums;font-size:17px}
+#vtxt.boost{color:var(--warn)}
+#mute.on{background:#3a1f22;color:#ffb3b5}
+
+#padarea{min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px}
+#pad{position:relative;border-radius:50%;background:radial-gradient(circle at 50% 50%,var(--s2) 0,var(--s1) 70%);touch-action:none;box-shadow:inset 0 0 0 1px var(--line)}
+#pad .ar{position:absolute;color:#c9cdd6;transition:transform 90ms var(--ease),color 90ms}
+#pad .ar svg{width:34px;height:34px;stroke-width:2.6}
+#pad .ar.u{top:9%;left:50%;translate:-50% 0}#pad .ar.d{bottom:9%;left:50%;translate:-50% 0}
+#pad .ar.l{left:9%;top:50%;translate:0 -50%}#pad .ar.r{right:9%;top:50%;translate:0 -50%}
+#pad .ar.lit{color:var(--acc);transform:scale(1.25)}
+#ok{position:absolute;inset:31%;border-radius:50%;background:var(--acc);display:flex;align-items:center;justify-content:center;font-weight:750;font-size:21px;letter-spacing:.5px;transition:transform 90ms var(--ease)}
+#ok.lit{transform:scale(.94);filter:brightness(1.15)}
+#hint{color:var(--mut);font-size:12.5px;text-align:center;min-height:16px}
+
+#keys{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:10px}
+#keys button{height:64px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:17px;font-weight:650}
+#back{background:#262b36}
+
+#dock{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+#dock button{height:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12.5px;color:#c9cdd6;background:var(--s1)}
+#dock button.on{background:#3a2c14;color:var(--warn)}
+#dock button span,#dock button{white-space:nowrap;letter-spacing:-.1px}
+
+#scrim{position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity 200ms var(--ease);z-index:5}
+#scrim.on{opacity:.55;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:var(--kb);max-height:calc(var(--H) - 56px - var(--kb));display:flex;flex-direction:column;background:#14161b;
+  border-radius:22px 22px 0 0;box-shadow:0 -1px 0 var(--line);transform:translateY(105%);transition:transform 260ms var(--drawer);z-index:6;
+  padding:8px 16px calc(env(safe-area-inset-bottom) + 14px)}
+.sheet.on{transform:none}
+#chs{height:calc(var(--H) - 56px - var(--kb))}
+.grab{width:40px;height:5px;border-radius:3px;background:var(--s3);margin:2px auto 10px;flex:none}
+.sh{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex:none;touch-action:none}
+.sh b{flex:1;font-size:18px}
+.sh button{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.lbl{color:var(--mut);font-size:13px;margin:14px 0 8px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.grid2 button,.grid3 button{height:52px;font-size:15px}
+
+#sides{display:none;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;flex:none}
+#sides.on{display:grid}
+#sides button{height:60px;padding:0 12px;text-align:left;display:flex;flex-direction:column;justify-content:center;align-items:flex-start;border:2px solid transparent;background:var(--s1)}
+#sides button small{color:var(--mut);font-size:11.5px;letter-spacing:.6px}
+#sides button span{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+#sides button.act{border-color:var(--acc);background:#18223d}
+#sides button.act small::after{content:"  · kanal listesi burada";color:#9db6ff;letter-spacing:0}
+#chq{flex:none}
+#chlist{overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;margin-top:10px;min-height:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.ch{display:flex;align-items:center;gap:14px;background:none;border-radius:12px;min-height:52px;padding:0 10px;text-align:left;flex:none;touch-action:pan-y}
+.ch:active{transform:none;background:var(--s2)}
+.ch .n{color:var(--mut);width:24px;font-size:13px;font-variant-numeric:tabular-nums}
+.ch .t{flex:1;font-size:16px}
+.ch .q{color:var(--mut);font-size:12px}
+.ch.cur{background:#18223d}.ch.cur .t{color:#9db6ff;font-weight:650}
+.empty{color:var(--mut);text-align:center;padding:24px}
+
+#tx{height:56px;font-size:18px}
+#typego{height:56px;background:var(--acc);font-weight:700;width:100%;margin-top:10px}
+
+#toast{position:fixed;left:16px;right:16px;top:calc(env(safe-area-inset-top) + 8px);background:#2a2e37;border-radius:14px;padding:12px 14px;font-size:14.5px;
+  opacity:0;transform:translateY(-8px);transition:opacity 180ms var(--ease),transform 180ms var(--ease);pointer-events:none;z-index:9}
+#toast.on{opacity:1;transform:none}#toast.bad{background:#4a1f22}
+.hold{position:relative;overflow:hidden}
+.hold i{position:absolute;left:0;bottom:0;height:3px;width:100%;background:var(--warn);transform-origin:left;transform:scaleX(0)}
+#mse{height:calc(var(--H) - 56px - var(--kb))}
+#tpad{flex:1;min-height:0;border-radius:20px;background:var(--s1);box-shadow:inset 0 0 0 1px var(--line);touch-action:none;position:relative;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--mut);font-size:13.5px;line-height:1.5;padding:16px}
+#tpad.act{background:#18223d}
+#tpad.gy{background:#1d2a1d}
+#tpad b{display:block;color:var(--ink);font-size:16px;margin-bottom:4px}
+#mrow{display:grid;grid-template-columns:1.3fr 1fr 64px 64px;gap:8px;margin-top:10px;flex:none}
+#mrow button{height:60px;font-size:16px;font-weight:650;display:flex;align-items:center;justify-content:center}
+#mtop{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;flex:none}
+#mtop button{height:46px;font-size:14px}
+#gyb.on{background:#2c5a2c;color:#d4ffd4}
+#mspd{display:flex;align-items:center;gap:10px;color:var(--mut);font-size:12.5px;margin-top:10px;flex:none}
+#mspd input{height:28px;padding:0;background:none;border:0;flex:1}
+#gyhelp{color:var(--warn);font-size:12.5px;margin:-4px 0 8px;display:none;flex:none}
+#gyhelp a{color:#9db6ff}
+#sides button.snd small::before{content:"🔊 "}
+/* PC: remote on the left, channel list + mouse pad always open next to it, keyboard shortcuts */
+body.desk #app{width:420px;max-width:420px}
+body.desk #scrim{display:none}
+body.desk #chs,body.desk #mse{transform:none;top:16px;bottom:16px;height:auto;max-height:none;border-radius:20px;box-shadow:inset 0 0 0 1px var(--line);transition:none;z-index:2}
+body.desk #chs{left:440px;width:min(380px,30vw);right:auto}
+body.desk #mse{left:calc(456px + min(380px,30vw));right:16px}
+body.desk #chs .grab,body.desk #mse .grab,body.desk #chs [data-close],body.desk #mse [data-close]{display:none}
+body.desk #typ,body.desk #more{left:50%;right:auto;width:480px;margin-left:-240px;top:12vh;bottom:auto;border-radius:22px;transform:none;transition:opacity 160ms var(--ease);opacity:0;visibility:hidden;z-index:8}
+body.desk #typ.on,body.desk #more.on{opacity:1;visibility:visible}
+body.desk #more{max-height:76vh}
+body.desk.modal #scrim{display:block;opacity:.55;pointer-events:auto}
+body.desk #dock [data-open=chs],body.desk #dock [data-open=mse]{display:none}
+body.desk #dock{grid-template-columns:repeat(3,1fr)}
+#keyhelp{display:none;color:var(--mut);font-size:12px;line-height:1.6;text-align:center}
+body.desk #keyhelp{display:block}
+#keyhelp kbd{background:var(--s2);border-radius:5px;padding:1px 6px;color:var(--ink);font:inherit;font-size:11.5px}
+#tpad.lock{background:#2a1f3d;color:#e6dcff}
+@media (prefers-reduced-motion:reduce){.sheet,#scrim,button,#pad .ar,#ok{transition:none}}
+</style>
+</head>
+<body>
+<svg style="display:none"><defs>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/></symbol>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M6 5l8 7-8 7z"/><path d="M17 5v14M20.5 5v14"/></symbol>
+<symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 21h8M9 3l3 3 3-3"/></symbol>
+<symbol id="i-kb" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+<symbol id="i-split" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 5v14"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></symbol>
+<symbol id="i-mouse" viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 7v4"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/></symbol>
+</defs></svg>
+
+<div id="app">
+  <div id="top"><span id="dot"></span><span id="now">Bağlanıyor…</span><span id="who"></span></div>
+
+  <div id="vol">
+    <button id="vdn" aria-label="Ses azalt" style="font-size:26px">−</button>
+    <div id="vbar"><div id="vfill"></div><div id="vnorm"></div><div id="vtxt">–</div></div>
+    <button id="vup" aria-label="Ses artır" style="font-size:24px">+</button>
+    <button id="mute" aria-label="Sessiz"><svg><use href="#i-mute"/></svg></button>
+  </div>
+
+  <div id="padarea">
+    <div id="pad">
+      <span class="ar u"><svg><use href="#i-up"/></svg></span>
+      <span class="ar d"><svg style="rotate:180deg"><use href="#i-up"/></svg></span>
+      <span class="ar l"><svg style="rotate:-90deg"><use href="#i-up"/></svg></span>
+      <span class="ar r"><svg style="rotate:90deg"><use href="#i-up"/></svg></span>
+      <div id="ok">OK</div>
+    </div>
+    <div id="hint">Kaydır ya da basılı tut</div>
+    <div id="keyhelp"><kbd>← ↑ → ↓</kbd> yön · <kbd>Enter</kbd> OK · <kbd>Esc</kbd>/<kbd>⌫</kbd> geri · <kbd>Home</kbd> ana · <kbd>Boşluk</kbd> oynat<br><kbd>+</kbd>/<kbd>−</kbd> ses · <kbd>M</kbd> sessiz · harf yaz = TV'ye yaz · <kbd>K</kbd> kanal ara</div>
+  </div>
+
+  <div id="keys">
+    <button id="back" data-k="back"><svg><use href="#i-back"/></svg>Geri</button>
+    <button data-k="play" aria-label="Oynat/Duraklat"><svg><use href="#i-play"/></svg></button>
+    <button data-k="home"><svg><use href="#i-home"/></svg>Ana</button>
+  </div>
+
+  <div id="dock">
+    <button data-open="chs"><svg><use href="#i-tv"/></svg>Kanallar</button>
+    <button data-open="mse"><svg><use href="#i-mouse"/></svg>Fare</button>
+    <button data-open="typ"><svg><use href="#i-kb"/></svg>Yaz</button>
+    <button id="splitb"><svg><use href="#i-split"/></svg><span>Ekranı böl</span></button>
+    <button data-open="more"><svg><use href="#i-more"/></svg>Diğer</button>
+  </div>
+</div>
+
+<div id="scrim"></div>
+
+<section class="sheet" id="chs">
+  <div class="grab"></div>
+  <div class="sh"><b>Kanallar</b><button data-close aria-label="Kapat"><svg><use href="#i-x"/></svg></button></div>
+  <div id="sides">
+    <button data-side="left"><small>SOL</small><span id="nL">–</span></button>
+    <button data-side="right"><small>SAĞ</small><span id="nR">–</span></button>
+  </div>
+  <input id="chq" type="search" placeholder="Kanal ara" autocomplete="off" enterkeyhint="search">
+  <div id="chlist"></div>
+</section>
+
+<section class="sheet" id="mse">
+  <div class="grab"></div>
+  <div class="sh"><b>Fare</b><button data-close aria-label="Kapat"><svg><use href="#i-x"/></svg></button></div>
+  <div id="mtop"><button id="gyb">Jiroskop: kapalı</button><button id="wheelb" data-k="back">Geri</button></div>
+  <div id="gyhelp"></div>
+  <div id="tpad"><div id="tpt"><b>Parmağınla kaydır</b>Dokun = tıkla · İki parmak = sayfayı kaydır<br>Basılı tut + kaydır = sürükle</div></div>
+  <div id="mrow"><button id="mclick" style="background:var(--acc)">Tıkla</button><button id="mright">Sağ tık</button><button id="mup" aria-label="Yukarı kaydır">▲</button><button id="mdn" aria-label="Aşağı kaydır">▼</button></div>
+  <div id="mspd">Hız<input id="msp" type="range" min="0.5" max="3" step="0.25" value="1.5"></div>
+</section>
+
+<section class="sheet" id="typ">
+  <div class="grab"></div>
+  <div class="sh"><b>TV'ye yaz</b><button data-close aria-label="Kapat"><svg><use href="#i-x"/></svg></button></div>
+  <input id="tx" placeholder="Yazdıkların TV'de anında görünür" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+  <button id="typego">Ara</button>
+  <button id="typeclr" style="height:46px;width:100%;margin-top:8px;font-size:14px">TV'deki yazıyı sil</button>
+  <div class="lbl">Önce TV'de yazı kutusunu seçmiş ol (OK).</div>
+</section>
+
+<section class="sheet" id="more">
+  <div class="grab"></div>
+  <div class="sh"><b>Diğer</b><button data-close aria-label="Kapat"><svg><use href="#i-x"/></svg></button></div>
+  <div style="overflow-y:auto;overscroll-behavior:contain;min-height:0">
+    <div class="lbl" style="margin-top:0">Bu cihazın adı (“Kim ne yaptı” kaydında görünür)</div>
+    <input id="devname" type="text" maxlength="24" placeholder="örn. Ali telefon" autocomplete="off">
+    <div class="lbl">Uygulamalar</div>
+    <div class="grid3"><button data-app="youtube">YouTube</button><button data-app="web">Tarayıcı</button><button data-app="tv">Canlı TV</button></div>
+    <div class="lbl">Oynatma</div>
+    <div class="grid3"><button data-k="rew">⏪ Geri sar</button><button data-k="ff">İleri sar ⏩</button><button data-k="menu">Menü</button></div>
+    <div class="lbl">Telefondan gönder</div>
+    <input id="link" type="url" placeholder="Link yapıştır (YouTube, video, site)" autocomplete="off" enterkeyhint="go">
+    <div class="grid2" style="margin-top:8px"><button id="linkgo" style="background:var(--acc);font-weight:650">Linki aç</button><button id="pickb">Video / foto seç</button></div>
+    <input id="file" type="file" accept="video/*,image/*,audio/*" hidden>
+    <div id="upmsg" class="lbl" style="margin:6px 0 0"></div>
+    <div class="lbl">Sorun giderme — 2 sn basılı tut</div>
+    <div class="grid2"><button class="hold" data-sys="tvrestart">TV'yi düzelt<i></i></button><button class="hold" data-sys="reboot" style="background:#331c1f">Cihazı yeniden başlat<i></i></button></div>
+    <div class="grid2" style="margin-top:8px"><button id="fsb">Tam ekran</button><button onclick="location.href='/log'">Kim ne yaptı</button></div>
+    <div class="lbl" id="ver" style="text-align:center;margin-top:12px"></div>
+  </div>
+</section>
+<div id="toast"></div>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const buzz=n=>{try{navigator.vibrate&&navigator.vibrate(n||10)}catch(e){}};
+/* this device's own name (phones behind the VPN router all share its IP) -> X-TV-Device on every request */
+let DEV='';try{DEV=localStorage.getItem('devname')||''}catch(e){}
+{const _f=window.fetch.bind(window);window.fetch=(u,o)=>{o=Object.assign({},o||{});if(DEV)o.headers=Object.assign({},o.headers||{},{'X-TV-Device':encodeURIComponent(DEV)});return _f(u,o)}}
+const DESK=matchMedia('(min-width: 1000px) and (pointer: fine)').matches;if(DESK)document.body.classList.add('desk');
+let tT;function toast(m,bad){const t=$('#toast');t.textContent=m;t.className='on'+(bad?' bad':'');clearTimeout(tT);tT=setTimeout(()=>t.className='',bad?3200:1800)}
+['gesturestart','gesturechange','dblclick','contextmenu'].forEach(e=>document.addEventListener(e,x=>x.preventDefault(),{passive:false}));
+
+/* stable layout: height only changes on rotation / fullscreen, never with the browser bar */
+function lockH(){document.documentElement.style.setProperty('--H',window.innerHeight+'px');fitPad()}
+let lastW=innerWidth;
+window.addEventListener('resize',()=>{if(Math.abs(innerWidth-lastW)>40){lastW=innerWidth;lockH()}});
+document.addEventListener('fullscreenchange',()=>setTimeout(lockH,200));
+function goFull(){const d=document.documentElement;if(!document.fullscreenElement&&d.requestFullscreen)d.requestFullscreen({navigationUI:'hide'}).catch(()=>{})}
+const standalone=matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches;
+if(!standalone)document.addEventListener('pointerup',()=>goFull(),{once:true});
+$('#fsb').onclick=()=>document.fullscreenElement?document.exitFullscreen():goFull();
+
+/* phone keyboard overlays the page (layout never jumps); only the open sheet moves above it */
+if(window.visualViewport){const kb=()=>{const k=Math.max(0,window.innerHeight-visualViewport.height-visualViewport.offsetTop);
+  document.documentElement.style.setProperty('--kb',(k>80?k:0)+'px')};visualViewport.addEventListener('resize',kb);visualViewport.addEventListener('scroll',kb)}
+
+/* requests (ordered) */
+let q=Promise.resolve();
+function post(path,body,quiet){const p=q.then(()=>fetch(path,{method:'POST',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined})
+  .then(r=>{if(!r.ok&&!quiet)toast('TV bunu yapamadı',1);return r}).catch(()=>{toast('TV\'ye ulaşılamıyor',1)}));q=p.catch(()=>{});return p}
+const key=k=>post('/key/'+k);
+
+const STOP=new Set(),stopAll=()=>STOP.forEach(f=>f());
+['blur','pagehide'].forEach(e=>addEventListener(e,stopAll));document.addEventListener('visibilitychange',stopAll);
+
+/* touchpad D-pad: tap, hold = repeat, slide = one step per ~26px (like v3) */
+const pad=$('#pad'),AR={up:$('.ar.u'),down:$('.ar.d'),left:$('.ar.l'),right:$('.ar.r')},OK=$('#ok');
+function fitPad(){const a=$('#padarea');if(!a.clientHeight)return;const s=Math.max(170,Math.min(a.clientHeight-28,a.clientWidth*.9,360));pad.style.width=pad.style.height=s+'px'}
+function flash(d){const el=d==='ok'?OK:AR[d];el.classList.add('lit');setTimeout(()=>el.classList.remove('lit'),110)}
+function press(d){key(d);flash(d);buzz(d==='ok'?18:8)}
+let sx,sy,moved,start,rT,rI,rX,pid=null;
+const stopRep=()=>{clearTimeout(rT);clearInterval(rI);clearTimeout(rX)};STOP.add(stopRep);
+function zone(e){const r=pad.getBoundingClientRect(),x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2;
+  if(Math.hypot(x,y)<r.width*.19)return'ok';return Math.abs(x)>Math.abs(y)?(x>0?'right':'left'):(y>0?'down':'up')}
+pad.addEventListener('pointerdown',e=>{if(pid!==null)return;pid=e.pointerId;e.preventDefault();pad.setPointerCapture(e.pointerId);
+  sx=e.clientX;sy=e.clientY;moved=false;start=zone(e);stopRep();
+  if(start!=='ok'){press(start);rT=setTimeout(()=>{rI=setInterval(()=>press(start),150);rX=setTimeout(stopRep,6000)},450)}});
+pad.addEventListener('pointermove',e=>{if(e.pointerId!==pid)return;const dx=e.clientX-sx,dy=e.clientY-sy,TH=26;
+  if(Math.abs(dx)<TH&&Math.abs(dy)<TH)return;
+  const d=Math.abs(dx)>Math.abs(dy)?(dx>0?'right':'left'):(dy>0?'down':'up');
+  stopRep();moved=true;press(d);sx=e.clientX;sy=e.clientY});
+const padEnd=e=>{if(e.pointerId!==pid)return;pid=null;stopRep();if(start==='ok'&&!moved&&e.type==='pointerup')press('ok')};
+['pointerup','pointercancel','lostpointercapture'].forEach(ev=>pad.addEventListener(ev,padEnd));
+
+/* plain keys */
+$$('[data-k]').forEach(b=>{let t1,t2;const k=b.dataset.k,rep=k==='rew'||k==='ff';const end=()=>{b.classList.remove('hit');clearTimeout(t1);clearInterval(t2)};STOP.add(end);
+  b.addEventListener('pointerdown',()=>{b.classList.add('hit');buzz();key(k);if(rep)t1=setTimeout(()=>t2=setInterval(()=>key(k),220),450)});
+  ['pointerup','pointerleave','pointercancel'].forEach(e=>b.addEventListener(e,end))});
+$$('[data-app]').forEach(b=>b.onclick=()=>{buzz();post('/app/'+b.dataset.app);closeSheet()});
+
+/* volume: drag the bar, or − / + (hold repeats) */
+let V={vol:0,max:150,normal:85,muted:false},vDrag=false;
+function drawVol(v,muted){const b=v>100;$('#vfill').style.width=(v/V.max*100)+'%';$('#vfill').className=b?'boost':'';
+  $('#vtxt').textContent=muted?'Sessiz':v+'%';$('#vtxt').className=b?'boost':'';$('#mute').classList.toggle('on',!!muted)}
+function showVol(s){V=s;$('#vnorm').style.left=(s.normal/s.max*100)+'%';if(!vDrag)drawVol(s.vol,s.muted)}
+const vbar=$('#vbar');const vAt=e=>{const r=vbar.getBoundingClientRect();return Math.round(Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*V.max/5)*5};
+let vLast=-1;vbar.addEventListener('pointerdown',e=>{vDrag=true;vbar.setPointerCapture(e.pointerId);vLast=vAt(e);drawVol(vLast,false)});
+vbar.addEventListener('pointermove',e=>{if(!vDrag)return;const v=vAt(e);if(v!==vLast){vLast=v;drawVol(v,false);if(v===100||v===V.normal)buzz(6)}});
+vbar.addEventListener('pointerup',()=>{if(!vDrag)return;vDrag=false;post('/vol/set?v='+vLast).then(r=>r&&r.ok&&r.json().then(showVol))});
+vbar.addEventListener('pointercancel',()=>{vDrag=false});
+[['#vdn','down'],['#vup','up']].forEach(([s,v])=>{const b=$(s);let t1,t2;const go=()=>post('/vol/'+v,null,1).then(r=>r&&r.ok&&r.json().then(showVol));
+  const end=()=>{clearTimeout(t1);clearInterval(t2)};STOP.add(end);
+  b.addEventListener('pointerdown',()=>{buzz();go();t1=setTimeout(()=>t2=setInterval(go,250),450)});['pointerup','pointerleave','pointercancel'].forEach(e=>b.addEventListener(e,end))});
+$('#mute').onclick=()=>{buzz();post('/vol/mute').then(r=>r&&r.ok&&r.json().then(showVol))};
+
+/* sheets */
+let OPEN=null;
+const PANEL=id=>DESK&&(id==='chs'||id==='mse');
+function openSheet(id){if(PANEL(id)){if(id==='chs'){loadCh();$('#chq').focus()}return}
+  closeSheet();OPEN=id;$('#'+id).classList.add('on');$('#scrim').classList.add('on');if(DESK)document.body.classList.add('modal');
+  if(id==='chs')loadCh();if(id==='typ'){sent=null;post('/kb/on',null,1);setTimeout(()=>$('#tx').focus(),220)}}
+function closeSheet(){if(!OPEN)return;$('#'+OPEN).classList.remove('on');$('#scrim').classList.remove('on');document.body.classList.remove('modal');document.activeElement&&document.activeElement.blur();OPEN=null}
+const isOpen=id=>OPEN===id||PANEL(id);
+$$('[data-open]').forEach(b=>b.onclick=()=>{buzz();openSheet(b.dataset.open)});
+$$('[data-close]').forEach(b=>b.onclick=()=>closeSheet());$('#scrim').onclick=()=>closeSheet();
+$$('.sheet').forEach(sh=>{let y0=null;[sh.querySelector('.grab'),sh.querySelector('.sh b')].forEach(el=>{
+  el.addEventListener('pointerdown',e=>{y0=e.clientY;sh.style.transition='none';el.setPointerCapture(e.pointerId)});
+  el.addEventListener('pointermove',e=>{if(y0===null)return;sh.style.transform='translateY('+Math.max(0,e.clientY-y0)+'px)'});
+  const up=e=>{if(y0===null)return;const d=e.clientY-y0;y0=null;sh.style.transition='';sh.style.transform='';if(d>80)closeSheet()};
+  el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up)})});
+
+/* channels */
+let CH=null,ST={};
+function nm(n){return(n||'').replace(/\s*\(Turkiye\)/,'').replace(/\s*\(\d+p\)\s*$/,'')}
+function qual(n){const m=(n||'').match(/\((\d+p)\)\s*$/);return m?m[1]:''}
+function loadCh(){if(CH)return renderCh();fetch('/channels').then(r=>r.json()).then(j=>{CH=j;renderCh()}).catch(()=>toast('Kanal listesi alınamadı',1))}
+function curIdx(){const s=ST.split;if(!s)return -1;if(s.single)return s.chi_left;return s.side==='left'?s.chi_left:s.chi_right}
+function renderCh(){if(!CH)return;const f=$('#chq').value.trim().toLocaleLowerCase('tr'),L=$('#chlist'),c=curIdx();L.textContent='';
+  CH.forEach((n,i)=>{if(f&&!n.toLocaleLowerCase('tr').includes(f))return;const b=document.createElement('button');b.className='ch'+(i===c?' cur':'');b.dataset.i=i;
+    b.innerHTML='<span class="n">'+(i+1)+'</span><span class="t"></span><span class="q">'+qual(n)+'</span>';b.querySelector('.t').textContent=nm(n);
+    b.onclick=()=>{buzz(16);toast(nm(n)+' açılıyor…');const sp=ST.split;post('/ch/'+i).then(()=>setTimeout(state,300));if(!sp||sp.single)closeSheet();b.blur()};L.appendChild(b)});
+  if(!L.children.length)L.innerHTML='<div class="empty">Kanal bulunamadı</div>'}
+$('#chq').addEventListener('input',renderCh);
+$$('#sides button').forEach(b=>b.onclick=()=>{buzz(14);post('/split/'+b.dataset.side).then(()=>setTimeout(state,200))});
+
+/* split toggle */
+$('#splitb').onclick=()=>{buzz(20);const on=ST.split&&!ST.split.single;toast(on?'Tek ekrana dönülüyor…':'Ekran bölünüyor…');
+  post(on?'/split/off':'/split/on').then(r=>{setTimeout(state,300);if(!on&&r&&r.ok){openSheet('chs');toast('Bölündü — sağ tarafa kanal seç (ses solda)')}})};
+
+/* live typing */
+let sent=null,yT;
+// send only the change (prev = what the TV already got): the TV field is never emptied in between
+function sync(){const v=$('#tx').value;const pv=sent==null?'':sent;if(v===pv)return;sent=v;post('/type',{text:v,prev:pv},1).then(r=>{if(r&&!r.ok)toast('Yazı gitmedi — TV\'de yazı kutusu seçili mi?',1)})}
+$('#typeclr').onclick=()=>{buzz(14);clearTimeout(yT);$('#tx').value='';sent='';post('/kb/clear');$('#tx').focus()};
+$('#tx').addEventListener('input',()=>{clearTimeout(yT);yT=setTimeout(sync,120)});
+const send=()=>{clearTimeout(yT);sync();post('/kb/enter');buzz(20);$('#tx').value='';sent=null;closeSheet()};
+$('#typego').onclick=send;$('#tx').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send()}});
+
+/* send from phone */
+$('#pickb').onclick=()=>$('#file').click();
+$('#file').addEventListener('change',()=>{const f=$('#file').files[0];if(!f)return;const x=new XMLHttpRequest();x.open('POST','/upload?name='+encodeURIComponent(f.name));
+  x.upload.onprogress=e=>{if(e.lengthComputable)$('#upmsg').textContent='Yükleniyor %'+Math.round(e.loaded/e.total*100)};
+  x.onload=()=>{$('#upmsg').textContent=x.status===200?'TV\'de açıldı':'Olmadı';$('#file').value=''};x.onerror=()=>$('#upmsg').textContent='TV\'ye ulaşılamadı';x.send(f)});
+const openLink=()=>{const v=$('#link').value.trim();if(!v)return;buzz(18);toast('Açılıyor…');post('/link',{url:v}).then(r=>{if(r&&r.ok){$('#link').value='';closeSheet()}})};
+$('#linkgo').onclick=openLink;$('#link').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();openLink()}});
+
+/* hold-to-confirm */
+$$('.hold').forEach(b=>{let t;const bar=b.querySelector('i');const end=()=>{clearTimeout(t);bar.style.transition='transform 200ms var(--ease)';bar.style.transform='scaleX(0)'};
+  b.addEventListener('pointerdown',()=>{bar.style.transition='transform 2s linear';bar.style.transform='scaleX(1)';
+    t=setTimeout(()=>{end();buzz(60);post('/sys/'+b.dataset.sys).then(r=>r&&r.ok&&toast(b.dataset.sys==='reboot'?'Cihaz yeniden başlıyor (~2 dk)':'TV yeniden başlıyor (~1 dk)'))},2000)});
+  ['pointerup','pointerleave','pointercancel'].forEach(e=>b.addEventListener(e,end))});
+
+/* phone mouse: touchpad + gyroscope -> /mouse (its own lane, never queued behind channel loads) */
+const MS={dx:0,dy:0,w:0,b:[],busy:false};
+function mflush(){if(MS.busy)return;const dx=Math.trunc(MS.dx),dy=Math.trunc(MS.dy),w=MS.w,b=MS.b.shift();
+  if(!dx&&!dy&&!w&&!b)return;MS.dx-=dx;MS.dy-=dy;MS.w=0;MS.busy=true;
+  fetch('/mouse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b?{dx,dy,w,b}:{dx,dy,w})})
+   .then(r=>{if(!r.ok)toast('Fare çalışmadı',1)}).catch(()=>toast('TV\'ye ulaşılamıyor',1)).finally(()=>{MS.busy=false;if(MS.dx||MS.dy||MS.w||MS.b.length)mflush()})}
+const spd=()=>+$('#msp').value;
+function mmove(dx,dy){MS.dx+=dx;MS.dy+=dy;mflush()}
+function mbtn(b){buzz(b==='l'?14:22);MS.b.push(b);mflush()}
+function mwheel(n){MS.w+=n;mflush()}
+try{const v=localStorage.getItem('msp');if(v)$('#msp').value=v}catch(e){}
+$('#msp').addEventListener('change',()=>{try{localStorage.setItem('msp',$('#msp').value)}catch(e){}});
+$('#mclick').onclick=()=>mbtn('l');$('#mright').onclick=()=>mbtn('r');
+[['#mup',1],['#mdn',-1]].forEach(([id,n])=>{const b=$(id);let t1,t2;const end=()=>{clearTimeout(t1);clearInterval(t2)};STOP.add(end);
+  b.addEventListener('pointerdown',()=>{buzz(6);mwheel(n);t1=setTimeout(()=>t2=setInterval(()=>mwheel(n),110),400)});
+  ['pointerup','pointerleave','pointercancel'].forEach(e=>b.addEventListener(e,end))});
+const tp=$('#tpad'),P=new Map();let tDown=0,tMoved=0,tLong=null,drag=false,two=0,gyPause=false;
+const endDrag=()=>{if(drag){drag=false;mbtn('lu');tp.classList.remove('act')}};STOP.add(endDrag);
+tp.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;e.preventDefault();tp.setPointerCapture(e.pointerId);P.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(P.size===1){tDown=Date.now();tMoved=0;gyPause=true;clearTimeout(tLong);
+    tLong=setTimeout(()=>{if(tMoved<10&&P.size===1){drag=true;mbtn('ld');tp.classList.add('act');buzz(30)}},450)}
+  else{clearTimeout(tLong);two=0}});
+tp.addEventListener('pointermove',e=>{const o=P.get(e.pointerId);if(!o)return;const dx=e.clientX-o.x,dy=e.clientY-o.y;o.x=e.clientX;o.y=e.clientY;
+  if(P.size===1){tMoved+=Math.abs(dx)+Math.abs(dy);if(tMoved>10)clearTimeout(tLong);
+    const v=Math.hypot(dx,dy),acc=1+Math.min(1.5,v/18);mmove(dx*spd()*acc,dy*spd()*acc)}
+  else{two+=dy/P.size;while(Math.abs(two)>=28){const n=two>0?1:-1;mwheel(n);two-=n*28}}});
+const tEnd=e=>{if(!P.has(e.pointerId))return;const multi=P.size>1;P.delete(e.pointerId);
+  if(P.size===0){clearTimeout(tLong);gyPause=false;if(drag)endDrag();else if(!multi&&e.type==='pointerup'&&tMoved<10&&Date.now()-tDown<300)mbtn('l')}};
+['pointerup','pointercancel','lostpointercapture'].forEach(ev=>tp.addEventListener(ev,tEnd));
+
+let GY=false,gyT=0,gySeen=false;
+function gyHelp(m){const h=$('#gyhelp');h.innerHTML=m||'';h.style.display=m?'block':'none'}
+function onMotion(e){const r=e.rotationRate;if(!r||r.alpha==null)return;gySeen=true;if(!GY||gyPause||OPEN!=='mse')return;
+  let dt=e.interval||16;if(dt<1)dt*=1000;dt=Math.min(dt,60)/1000;
+  const g=e.accelerationIncludingGravity||{},gx=g.x||0,gy=g.y||0,gz=g.z||0,gn=Math.hypot(gx,gy,gz);
+  // Chrome: rotationRate.alpha/beta/gamma = deg/s around device X/Y/Z (checked with sensor emulation)
+  const yaw=gn>3?(r.alpha*gx+r.beta*gy+r.gamma*gz)/gn:r.gamma, pitch=r.alpha;   // turn around the real vertical = left/right, tilt = up/down
+  const dz=v=>Math.abs(v)<1.5?0:v, K=17*spd();   // ~25 px per degree at the default speed
+  mmove(-dz(yaw)*K*dt,-dz(pitch)*K*dt)}
+window.addEventListener('devicemotion',onMotion);
+function setGy(on){GY=on;$('#gyb').classList.toggle('on',on);$('#gyb').textContent='Jiroskop: '+(on?'açık':'kapalı');tp.classList.toggle('gy',on);
+  $('#tpt').innerHTML=on?'<b>Telefonu TV\'ye doğru tut ve çevir</b>Dokun = tıkla · Parmağın basılıyken imleç durur (telefonu ortala)':'<b>Parmağınla kaydır</b>Dokun = tıkla · İki parmak = sayfayı kaydır<br>Basılı tut + kaydır = sürükle';
+  try{localStorage.setItem('gy',on?'1':'')}catch(e){}}
+$('#gyb').onclick=async()=>{buzz(16);if(GY){setGy(false);return}
+  if(!window.isSecureContext){gyHelp('Jiroskop için kumandayı güvenli adresten aç: <a href="https://__TV_HOSTNAME__/">https://__TV_HOSTNAME__</a> (sonra Ana ekrana ekle)');return}
+  try{if(window.DeviceMotionEvent&&typeof DeviceMotionEvent.requestPermission==='function'){if(await DeviceMotionEvent.requestPermission()!=='granted'){gyHelp('Hareket sensörü izni verilmedi');return}}}catch(e){}
+  gyHelp('');setGy(true);gySeen=false;setTimeout(()=>{if(GY&&!gySeen){setGy(false);gyHelp('Bu telefon tarayıcıya jiroskop bilgisi vermiyor; parmakla kullan.')}},1500)};
+try{if(localStorage.getItem('gy')&&window.isSecureContext)setGy(true)}catch(e){}
+if(!window.isSecureContext)$('#gyb').title='https gerekli';
+
+
+/* PC: lock the real mouse to the pad -> it drives the TV pointer (click, right click, wheel, drag). Esc releases. */
+if(DESK){
+  const lockTxt='<b>PC faresini TV\'ye bağlamak için tıkla</b>Sonra fareyi oynat: TV imleci hareket eder · Sol/sağ tık, tekerlek çalışır<br><kbd>Esc</kbd> = fareyi geri al';
+  $('#tpt').innerHTML=lockTxt;
+  tp.addEventListener('mousedown',e=>{if(document.pointerLockElement!==tp){e.preventDefault();tp.requestPointerLock();return}
+    e.preventDefault();if(e.button===0)mbtn('ld');else if(e.button===2)mbtn('r')});
+  tp.addEventListener('mouseup',e=>{if(document.pointerLockElement===tp&&e.button===0)mbtn('lu')});
+  tp.addEventListener('mousemove',e=>{if(document.pointerLockElement===tp)mmove(e.movementX*spd()*.8,e.movementY*spd()*.8)});
+  tp.addEventListener('wheel',e=>{if(document.pointerLockElement!==tp)return;e.preventDefault();mwheel(e.deltaY<0?1:-1)},{passive:false});
+  document.addEventListener('pointerlockchange',()=>{const on=document.pointerLockElement===tp;tp.classList.toggle('lock',on);
+    $('#tpt').innerHTML=on?'<b>Fare TV\'de</b>Sol tık = tıkla · Sağ tık = geri · Tekerlek = kaydır<br><kbd>Esc</kbd> = fareyi geri al':lockTxt});
+  // keyboard = remote (not while typing in a field or while the mouse is locked)
+  let lastK=0;
+  document.addEventListener('keydown',e=>{
+    const t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'))return;
+    if(e.ctrlKey||e.altKey||e.metaKey)return;
+    const now=Date.now();if(e.repeat&&now-lastK<110){e.preventDefault();return}lastK=now;
+    const map={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',Enter:'ok'};
+    if(map[e.key]){e.preventDefault();press(map[e.key]);return}
+    if(e.key==='Escape'&&document.pointerLockElement)return;
+    if(e.key==='Escape'&&OPEN){e.preventDefault();closeSheet();return}
+    if(e.key==='Escape'||e.key==='Backspace'){e.preventDefault();key('back');flashBtn('#back');return}
+    if(e.key==='Home'){e.preventDefault();key('home');return}
+    if(e.key===' '){e.preventDefault();key('play');return}
+    if(e.key==='+'||e.key==='='){e.preventDefault();post('/vol/up',null,1).then(r=>r&&r.ok&&r.json().then(showVol));return}
+    if(e.key==='-'){e.preventDefault();post('/vol/down',null,1).then(r=>r&&r.ok&&r.json().then(showVol));return}
+    if(e.key==='m'||e.key==='M'){e.preventDefault();post('/vol/mute').then(r=>r&&r.ok&&r.json().then(showVol));return}
+    if(e.key==='k'||e.key==='K'){e.preventDefault();$('#chq').focus();return}
+    if(e.key.length===1&&!OPEN){e.preventDefault();openSheet('typ');$('#tx').value=e.key;clearTimeout(yT);yT=setTimeout(sync,120)}
+  });
+  loadCh();
+}
+function flashBtn(sel){const b=$(sel);if(!b)return;b.classList.add('hit');setTimeout(()=>b.classList.remove('hit'),140)}
+
+/* this device's name */
+$('#devname').value=DEV;
+$('#devname').addEventListener('change',()=>{DEV=$('#devname').value.trim().slice(0,24);try{localStorage.setItem('devname',DEV)}catch(e){};toast(DEV?'Ad kaydedildi: '+DEV:'Ad silindi')});
+let askedName=false;
+/* state */
+const ago=s=>{s=Math.round(s);return s<60?s+' sn':s<3600?Math.round(s/60)+' dk':Math.round(s/3600)+' sa'};
+let lastErr=null;
+function state(){fetch('/state').then(r=>r.json()).then(s=>{ST=s;$('#dot').classList.add('on');showVol(s);const sp=s.split,on=sp&&!sp.single;
+  const au=sp&&(sp.audio||sp.side);
+  $('#now').textContent=sp?(sp.single?nm(sp.single):(au==='left'?'🔊 ':'')+nm(sp.left)+'  |  '+(au==='right'?'🔊 ':'')+nm(sp.right)):(s.app||'TV');
+  $('#hint').textContent=on?'◀ ▶ taraf seç (ses + kanal o tarafa) · ▲ ▼ '+(sp.side==='left'?'sol':'sağ')+' kanal · Geri: tek ekran':sp?'▲ ▼ kanal değiştir · Geri: menüye dön':'Kaydır ya da basılı tut';
+  if(s.version)$('#ver').textContent='Kumanda sürümü: '+s.version;
+  $('#who').textContent=s.last&&s.last.who?s.last.who+' · '+ago(s.last.ago):'';
+  $('#splitb').classList.toggle('on',!!on);$('#splitb span').textContent=on?'Tek ekran':'Ekranı böl';
+  $('#sides').classList.toggle('on',!!on);
+  if(on){$('#nL').textContent=nm(sp.left);$('#nR').textContent=nm(sp.right);$$('#sides button').forEach(b=>{b.classList.toggle('act',b.dataset.side===sp.side);b.classList.toggle('snd',b.dataset.side===au)})}
+  if(isOpen('chs')){const c=curIdx();$$('#chlist .ch').forEach(b=>b.classList.toggle('cur',+b.dataset.i===c))}
+  if(s.err&&s.err!==lastErr)toast(s.err,1);lastErr=s.err;
+  if(s.via_router&&!DEV&&!askedName){askedName=true;openSheet('more');setTimeout(()=>{$('#devname').focus();toast('Bu telefona bir ad ver: VPN üzerinden herkes aynı görünüyor')},300)}})
+  .catch(()=>{$('#dot').classList.remove('on');$('#now').textContent='TV\'ye ulaşılamıyor'})}
+lockH();state();setInterval(()=>{if(!document.hidden)state()},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)state()});
+</script>
+</body>
+</html>

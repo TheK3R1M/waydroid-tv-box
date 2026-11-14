@@ -1,0 +1,5 @@
+[Unit]
+Description=Android LAN isolation
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tv-net-isolate.sh

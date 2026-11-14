@@ -1,0 +1,10 @@
+[Unit]
+Description=TV: runtime dir + session D-Bus
+[Service]
+Type=simple
+RuntimeDirectory=tv
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=no
+EnvironmentFile=/etc/tv/env
+ExecStart=/usr/bin/dbus-daemon --session --address=unix:path=/run/tv/bus --nofork --nopidfile --syslog-only
+Restart=on-failure
