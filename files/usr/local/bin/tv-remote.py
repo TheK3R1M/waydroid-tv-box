@@ -1013,35 +1013,184 @@ def _ass(t):
     return str(t).replace("\\", "/").replace("{", "(").replace("}", ")").replace("$", "$$")
 
 
-def osd_now(ms=4000):
-    """Show a short channel list on the TV itself (people with the physical remote have no phone screen):
-    2 channels above, the current one highlighted, 3 below, in the same order as the phone list (no. 1 on top)."""
+# ---- On-TV overlay (drawn by the host mpv with `osd-overlay`, ASS events in 1920x1080 coordinates).
+# Banner = TV-style info bar on every channel change; List = channel browser opened with OK, moved with ▲▼
+# (no zapping while browsing), OK tunes, ◀/Back closes. Auto-hides (banner 4 s, list 12 s idle).
+ACCENT = "F26D3D"          # BGR of #3d6df2 (same blue as the phone remote)
+PANEL = "141210"
+FONT = "DejaVu Sans"
+_ui = {"mode": None, "cur": 0, "until": 0.0}
+_ui_lock = threading.Lock()
+
+
+def _disp(name):
+    return _ass(re.sub(r"\s*\(\d+p\)", "", name))
+
+
+def _rect(x, y, w, h, color, alpha, r=16):
+    r = min(r, w // 2, h // 2)
+    d = (f"m {r} 0 l {w - r} 0 b {w} 0 {w} 0 {w} {r} l {w} {h - r} b {w} {h} {w} {h} {w - r} {h} "
+         f"l {r} {h} b 0 {h} 0 {h} 0 {h - r} l 0 {r} b 0 0 0 0 {r} 0")
+    return f"{{\\an7\\pos({x},{y})\\bord0\\shad0\\1c&H{color}&\\1a&H{alpha:02X}&\\p1}}{d}{{\\p0}}"
+
+
+def _text(x, y, t, size, color="FFFFFF", bold=False, an=7, alpha=0):
+    return (f"{{\\an{an}\\pos({x},{y})\\fn{FONT}\\fs{size}\\b{1 if bold else 0}\\1c&H{color}&\\1a&H{alpha:02X}&"
+            f"\\bord0\\shad2\\4c&H000000&\\4a&H90&}}{t}")
+
+
+_ovc = {"sock": None, "pid": None}
+_ovc_lock = threading.Lock()
+
+
+def _ovc_drain(sock):
     try:
-        chs = channels()
-        sd = _split["side"] if _split["mode"] == "split" else "left"
-        i = _want.get(sd)
-        if i is None:
-            src = _split["src"][sd]
-            i = src[1] if src and src[0] == "ch" else None
-        if i is None or not chs:
-            return mpv_ipc(["show-text", src_name(_split["src"][sd]), ms], timeout=1)
-        n = len(chs); i %= n
-        rows = []
-        for k in range(-2, 4):
-            j = (i + k) % n
-            name = _ass(chs[j][0])
-            if k == 0:
-                rows.append("{\\c&H00D7FF&\\alpha&H00&\\b1\\fs40}▶ %d. %s" % (j + 1, name))
-            else:
-                rows.append("{\\c&HFFFFFF&\\alpha&H50&\\b0\\fs32}     %d. %s" % (j + 1, name))
-        head = ""
-        if _split["mode"] == "split":
-            head = "{\\c&HFFFFFF&\\b1\\fs26}%s\\N" % ("SOL taraf" if sd == "left" else "SAĞ taraf")
-        al = "an6" if _split["mode"] == "split" and sd == "right" else "an4"   # list sits on the chosen half
-        txt = "${osd-ass-cc/0}{\\%s\\fs32\\bord3\\shad0}" % al + head + "\\N".join(rows)
-        mpv_ipc(["show-text", txt, ms], timeout=1)
+        while sock.recv(65536):
+            pass
+    except Exception:
+        pass
+
+
+def _overlay(lines):
+    """osd-overlay belongs to the IPC client that created it: mpv deletes it when that connection closes, so a
+    connect-send-close call (mpv_ipc) shows nothing. Keep one persistent connection (reader thread discards
+    mpv's replies/events so the socket never fills); reconnect when mpv was restarted."""
+    import socket
+    data = "\n".join(lines) if lines else ""
+    msg = (json.dumps({"command": {"name": "osd-overlay", "id": 7, "format": "ass-events" if lines else "none",
+                                   "data": data, "res_x": 1920, "res_y": 1080, "z": 10}}) + "\n").encode()
+    p = _split["proc"]
+    with _ovc_lock:
+        for attempt in (1, 2):
+            try:
+                if _ovc["sock"] is None or _ovc["pid"] != (p.pid if p else None):
+                    if _ovc["sock"]:
+                        _ovc["sock"].close()
+                    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); c.settimeout(2); c.connect(MPV_SOCK)
+                    c.settimeout(None)
+                    threading.Thread(target=_ovc_drain, args=(c,), daemon=True).start()
+                    _ovc.update(sock=c, pid=p.pid if p else None)
+                _ovc["sock"].sendall(msg)
+                return
+            except Exception:
+                try:
+                    _ovc["sock"] and _ovc["sock"].close()
+                except Exception:
+                    pass
+                _ovc["sock"] = None
+
+
+def ui_hide():
+    with _ui_lock:
+        _ui["mode"] = None
+    _overlay([])
+
+
+def _side():
+    return _split["side"] if _split["mode"] == "split" else "left"
+
+
+def _playing_idx():
+    sd = _side()
+    i = _want.get(sd)
+    if i is None:
+        src = _split["src"][sd]
+        i = src[1] if src and src[0] == "ch" else None
+    return i
+
+
+def ui_banner(ms=4000):
+    try:
+        chs = channels(); i = _playing_idx()
+        if not chs or i is None:
+            name = _ass(src_name(_split["src"][_side()])); num = ""; sub = ""
+        else:
+            n = len(chs); i %= n
+            name, num = _disp(chs[i][0]), str(i + 1)
+            sub = f"▲  {_disp(chs[(i - 1) % n][0])}        ▼  {_disp(chs[(i + 1) % n][0])}"
+        tag = ("SOL EKRAN  ·  " if _side() == "left" else "SAĞ EKRAN  ·  ") if _split["mode"] == "split" else ""
+        L = [_rect(60, 846, 980, 176, PANEL, 0x1C, 22), _rect(60, 846, 12, 176, ACCENT, 0x00, 6),
+             _text(110, 868, num, 78, ACCENT, True), _text(250, 872, name, 60, "FFFFFF", True),
+             _text(252, 958, tag + sub, 30, "C8C8C8"),
+             _text(1010, 868, "OK  ·  Kanal listesi", 24, "9A9A9A", an=9)]
+        with _ui_lock:
+            _ui.update(mode="banner", until=time.time() + ms / 1000)
+        _overlay(L)
     except Exception as e:
-        print("osd:", e, flush=True)
+        print("banner:", e, flush=True)
+
+
+ROWS = 11
+
+
+def ui_list_draw():
+    chs = channels()
+    if not chs:
+        return
+    n = len(chs); cur = _ui["cur"] % n; playing = _playing_idx()
+    top = max(0, min(cur - ROWS // 2, n - ROWS)) if n > ROWS else 0
+    L = [_rect(60, 60, 760, 960, PANEL, 0x1C, 26),
+         _text(110, 92, "Kanallar", 50, "FFFFFF", True),
+         _text(112, 160, "▲▼ seç     OK izle     ◀ / Geri kapat", 26, "A0A0A0")]
+    if _split["mode"] == "split":
+        L.append(_text(780, 100, "SOL EKRAN" if _side() == "left" else "SAĞ EKRAN", 26, ACCENT, True, an=9))
+    y0 = 222
+    for k in range(min(ROWS, n)):
+        j = top + k; y = y0 + k * 70
+        sel = j == cur
+        if sel:
+            L.append(_rect(84, y - 8, 712, 64, ACCENT, 0x00, 14))
+        L.append(_text(112, y, str(j + 1), 32, "FFFFFF" if sel else "8C8C8C", sel))
+        L.append(_text(200, y - 2, _disp(chs[j][0]), 38, "FFFFFF", sel, alpha=0 if sel else 0x20))
+        if playing is not None and j == playing % n:
+            L.append(_text(776, y, "● izleniyor", 24, "FFFFFF" if sel else ACCENT, True, an=9))
+    if top > 0:
+        L.append(_text(440, 196, "▲", 24, "8C8C8C", an=8))
+    if top + ROWS < n:
+        L.append(_text(440, 1002, "▼", 24, "8C8C8C", an=2))
+    _overlay(L)
+
+
+def ui_list_open():
+    i = _playing_idx()
+    with _ui_lock:
+        _ui.update(mode="list", cur=i if i is not None else _ch["i"], until=time.time() + 12)
+    ui_list_draw()
+
+
+def ui_list_move(step):
+    n = len(channels()) or 1
+    with _ui_lock:
+        _ui.update(cur=(_ui["cur"] + step) % n, until=time.time() + 12)
+    ui_list_draw()
+
+
+def _ui_timer():
+    while True:
+        time.sleep(0.5)
+        if _ui["mode"] and time.time() > _ui["until"]:
+            ui_hide()
+
+
+threading.Thread(target=_ui_timer, daemon=True).start()
+
+
+def osd_now(ms=4000):
+    """Channel changed: show the TV-style banner (kept as a name for the older call sites)."""
+    ui_banner(ms)
+
+
+def tv_open():
+    """Start live TV on the last channel (from Android) and open the channel list."""
+    chs = channels()
+    if not chs:
+        return False
+    if not _split["on"]:
+        i = _ch["i"] % len(chs); _want["left"] = i
+        if not watch_single(("ch", i)):
+            return False
+    ui_list_open()
+    return True
 
 
 # ---- Voice key (tv-voice.service records the remote's mic while its voice key is held, transcribes it
@@ -1073,7 +1222,10 @@ def field_focused():
 
 def voice_feedback(msg):
     if _split["on"]:
-        mpv_ipc(["show-text", "${osd-ass-cc/0}{\\an7\\fs34\\bord3}" + _ass(msg), 3000], timeout=1)
+        _overlay([_rect(60, 60, 900, 96, PANEL, 0x30, 22), _rect(60, 60, 12, 96, ACCENT, 0, 6),
+                  _text(100, 82, _ass(msg), 38, "FFFFFF", True)])
+        with _ui_lock:
+            _ui.update(mode="voice", until=time.time() + 3)
 
 
 _VERB = r"(?:\s+(?:kanalını|kanalı|kanal))?(?:\s+(?:aç|açar mısın|izle|izleyelim|koy|başlat))\s*(?:lütfen)?$"
@@ -1116,6 +1268,15 @@ def voice_cmd(text, ip):
         return split_on(), "bölünmüş ekran"
     if re.fullmatch(r"tek ekran( yap| aç)?", n) and _split["on"]:
         return split_off(to_single=True), "tek ekran"
+    if re.fullmatch(r"(kanallar|kanal listesi|canlı tv|canlı yayın|televizyon|tv)( aç| göster| listesi)?", n):
+        return tv_open(), "kanal listesi"
+    for pat, app in ((r"(youtube|yutup|you tube|smart ?tv|smart ?tube)", "youtube"),
+                     (r"(firefox|tarayıcı|internet|web)", "web")):
+        if re.fullmatch(pat + r"( aç| uygulaması| uygulamasını aç|ı aç|u aç|yu aç|yi aç)?", n):
+            if _split["on"]:
+                split_off(to_single=False)
+            _focus["t"] = 0
+            return android(f"am start -n {APPS[app]}", timeout=8), f"uygulama {app}"
     chs = channels()
     step = None
     if re.search(r"(sonraki|ileri|aşağı) kanal|kanal (ileri|aşağı|sonraki)", n):
@@ -1227,9 +1388,11 @@ def _remote_bridge():
             for ev in evs:
                 if ev.type != ecodes.EV_KEY or ev.value not in (1, 2) or ev.code not in codes:
                     continue
-                if not _split["on"]:
-                    continue                        # Android has focus and handles the key itself
                 path = codes[ev.code]
+                if not _split["on"]:
+                    if path in ("/ch/next", "/ch/prev") and ev.value == 1:
+                        pool.submit(_bridge_post, "/tv/open")   # CH key in Android = open live TV + list
+                    continue                        # everything else: Android has focus and handles it
                 now = time.time()
                 if ev.value == 2 and path not in _REPEAT_OK and now - last_sent.get(path, 0) < 0.35:
                     continue
@@ -1351,13 +1514,30 @@ class H(http.server.BaseHTTPRequestHandler):
             st = vol_state(); log_action(ip, f"ses {parts[1]} → {st['vol']}%{' (sessiz)' if st['muted'] else ''}")
             return self.send_json(st)
         ok = False
-        if len(parts) == 2 and parts[0] == "key" and _split["on"] and parts[1] in ("back", "home"):
+        if len(parts) == 2 and parts[0] == "key" and _split["on"] and parts[1] == "back" and _ui["mode"] == "list":
+            ui_hide(); ok = True
+            log_action(ip, "kanal listesi kapandı")
+        elif len(parts) == 2 and parts[0] == "key" and _split["on"] and parts[1] in ("back", "home"):
+            ui_hide()
             was = _split["mode"]
             ok = split_off(to_single=(parts[1] == "back"))
             log_action(ip, f"tuş {parts[1]} → " + ("bölme kapandı" if was == "split" and parts[1] == "back" else "oynatıcı kapandı"))
         elif len(parts) == 2 and parts[0] == "key" and _split["on"] and parts[1] in ("up", "down", "left", "right", "ok", "play"):
             chs = channels()
-            if parts[1] in ("up", "down") and chs:
+            if _ui["mode"] == "list" and chs:
+                if parts[1] in ("up", "down"):
+                    ui_list_move(-1 if parts[1] == "up" else 1); ok = True
+                elif parts[1] in ("ok", "play"):
+                    sd = _side(); i = _ui["cur"] % len(chs)
+                    _want[sd] = i; _ch["i"] = i
+                    log_action(ip, f"listeden kanal {chs[i][0]}")
+                    ok = split_set(("ch", i), sd)
+                    ui_banner()
+                else:
+                    ui_hide(); ok = True
+            elif parts[1] == "ok":
+                ui_list_open(); ok = True
+            elif parts[1] in ("up", "down") and chs:
                 sd = _split["side"] if _split["mode"] == "split" else "left"
                 i = (base_idx(sd) + (-1 if parts[1] == "up" else 1)) % len(chs)   # ▲ = up the list (towards no. 1), like the phone list
                 _want[sd] = i; _ch["i"] = i
@@ -1368,7 +1548,8 @@ class H(http.server.BaseHTTPRequestHandler):
                 log_action(ip, f"bölme: {parts[1]} taraf seçildi")
             else:
                 ok = True
-            osd_now()
+            if _ui["mode"] != "list":
+                osd_now()
         elif len(parts) == 2 and parts[0] == "key" and parts[1] in KEYS:
             ok = android(f"input keyevent {KEYS[parts[1]]}")
             log_action(ip, f"tuş {parts[1]}" + ("" if ok else " (BAŞARISIZ)"))
@@ -1466,6 +1647,9 @@ class H(http.server.BaseHTTPRequestHandler):
                 _want["left"] = i; _ch["i"] = i
                 ok = watch_single(("ch", i))
                 log_action(ip, f"kanal {chs[i][0]}" + ("" if ok else " (BAŞARISIZ)"))
+        elif parts == ["tv", "open"]:
+            ok = tv_open()
+            log_action(ip, "canlı TV + kanal listesi açıldı" + ("" if ok else " (BAŞARISIZ)"))
         elif len(parts) == 2 and parts[0] == "split" and parts[1] in ("on", "off", "left", "right"):
             ok = {"on": split_on, "off": split_off}.get(parts[1], lambda: split_focus(parts[1]))()
             log_action(ip, f"bölünmüş ekran {parts[1]}" + ("" if ok else " (BAŞARISIZ)"))

@@ -105,3 +105,17 @@ watching:
   not re-add automatic IME switching ([§7](07-adb.md)).
 
 Next: [§15 tv-guard](15-tv-guard.md) · Changes: [§16](16-changes-2026-11.md)
+
+## 14.6 On-TV channel UI (banner + list) ✅
+
+Drawn by the host mpv with `osd-overlay` (ASS events in 1920x1080 coordinates: rounded panels via `\p1`
+drawings, DejaVu Sans), not `show-text` (which looks like terminal text).
+
+- **Banner** on every channel change (4 s): number, name, the channel above (▲) and below (▼), side in split.
+- **Channel list**: OK while watching opens it; ▲▼ move the highlight without zapping; OK tunes and closes;
+  ◀ / Back closes; closes itself after 12 s idle. "● izleniyor" marks the playing channel.
+- **From Android**: the remote's CH/Page keys (or saying "kanallar") start live TV on the last channel and open
+  the list.
+- **Pitfall:** an `osd-overlay` belongs to the IPC client that created it and disappears when that connection
+  closes. A connect-send-close helper shows nothing; keep one persistent IPC connection (with a reader thread that
+  discards replies/events) and reconnect when mpv restarts. Verified on the real HDMI output (`tvshot`).
