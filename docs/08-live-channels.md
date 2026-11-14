@@ -71,3 +71,13 @@ P = scale=960:540:force_original_aspect_ratio=decrease,pad=960:1080:-1:-1,setsar
 Remote semantics (owner's model): tapping a channel plays it full screen; up/down = channel ±1; "Ekranı böl" = split (left = current, right = next); in split, left/right choose the side; Back = leave split on the heard half; Back again = Android; app buttons and uploads close mpv first. A watchdog (`_split_watch`) reloads mpv if `time-pos` is stuck for ~10 s or `avsync` is off by > 3 s twice in a row, and logs `görüntü donmuştu → oynatıcı otomatik yenilendi`.
 
 Measured on this hardware: single channel ~10 % CPU (VA-API copy path), split ~40 % of the box, 0 dropped frames.
+
+## 8.x Extra channels from a community list (official/FAST only)
+
+`files/usr/local/bin/tv-channels-extra.py` + `tv-channels-extra.timer` (daily 05:20) read any M3U list set in
+`TV_EXTRA_M3U_URL` (`/etc/tv/env`), keep only entries on official broadcaster CDNs and FAST platforms (Stingray,
+Amagi, Bloomberg, NHK, DW, Euronews, CGTN, ...), probe each (master + first variant must return segments) and
+write `/etc/tv/extra.m3u`. tv-remote lists them after the curated list (numbers of the curated channels stay
+stable; names already present are skipped). Community lists usually also carry unlicensed restreams of pay
+channels (bare IPs, proxies, "24/7 film" workers): those are dropped by design, do not widen `ALLOW` for them.
+Reference run: 205 entries -> 65 official/FAST candidates -> 60 working.

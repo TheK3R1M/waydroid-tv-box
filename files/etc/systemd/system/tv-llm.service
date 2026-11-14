@@ -1,0 +1,15 @@
+[Unit]
+Description=Local intent model for the TV voice key (llama.cpp server, loopback only)
+
+[Service]
+ExecStart=/opt/tv-voice/llama.cpp/build/bin/llama-server -m /opt/tv-voice/llm/Qwen3-1.7B-Q4_K_M.gguf --host 127.0.0.1 --port 8179 -t 3 -c 2048 -np 1 --no-webui
+ExecStartPost=-/usr/bin/python3 /usr/local/bin/tv-intent.py
+TimeoutStartSec=400
+Restart=always
+RestartSec=10
+Nice=5
+CPUQuota=300%
+MemoryMax=2500M
+
+[Install]
+WantedBy=multi-user.target

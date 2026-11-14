@@ -63,3 +63,34 @@ apart from "kıs" heard as "kız" (handled in the parser). Real-voice accuracy t
 
 Audio never leaves the box and is never written to disk. The speech server has no network port. Do not swap in a
 cloud speech API without the owner's consent.
+
+## 17.6 Calibrated intent selection (local LLM) ✅ offline / ❔ by voice
+
+Phrases the exact rules don't catch go to a small local model that **selects** one action from a fixed menu
+(letters A–O); the next-token probability over the letters is the confidence:
+
+| Confidence | Behaviour |
+|---|---|
+| ≥ 85 % | act |
+| 45–85 % | while a channel plays: "Bunu mu demek istediniz?" list on the TV (▲▼ + OK, "Hiçbiri") |
+| lower, or "not TV related" | "anlaşılmadı" (nothing happens) |
+
+- `tv-llm.service`: llama.cpp `llama-server` on `127.0.0.1:8179` (loopback only), `Qwen3-1.7B-Q4_K_M` (1.3 GB),
+  `-t 3`, CPUQuota 300 %. `files/usr/local/bin/tv-intent.py` builds the prompt (action menu, channel names,
+  28 few-shot examples) and reads `n_probs`. The long prompt stays in llama-server's prompt cache; tv-remote
+  re-warms it every 5 min (a cache miss = ~20 s on this CPU, a hit = ~1.3 s).
+- If an intrusion checker watches host ports (docs/15), add `tcp 127.0.0.1:8179` to its baseline first.
+- Build: `git clone --depth 1 https://github.com/ggml-org/llama.cpp && cmake -B build -DLLAMA_CURL=OFF &&
+  cmake --build build -j3 --target llama-server`; model from `ggml-org/Qwen3-1.7B-GGUF`.
+
+Benchmark on the reference box (46 Turkish phrases, 15 intents, model alone):
+
+| Model | Correct | Median latency |
+|---|---|---|
+| Qwen3-1.7B Q4_K_M, few-shot | 35/46 | 1.2 s |
+| Qwen3-1.7B Q4_K_M, zero-shot | 32/46 | 1.1 s |
+| Qwen3-0.6B Q8_0 | 17/46 | 0.6 s |
+| FunctionGemma 270M Q8_0 (no fine-tune) | 0/46 | 2.1 s |
+
+Most model misses ("sesi kapat", "sustur", "YouTube", "Firefox", "durdur") are caught earlier by the rules, so
+rules + model handle nearly all test phrases. FunctionGemma needs task fine-tuning before it is useful here.
