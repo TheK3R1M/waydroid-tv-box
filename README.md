@@ -93,7 +93,7 @@ tools/fill-placeholders.sh tv-setup-kit-filled
 
 ## Durum (özet)
 
-Canlı kutu doğrulanmış çalışan bir sistemdir; bu kit onun sanitize edilmiş, yeniden üretilebilir hâlidir. Yeni bölümler (fiziksel kumanda köprüsü, tv-guard, Firefox, ARM çeviri) için ❔ işaretleri geçerlidir. Ayrıntı: [docs/16-changes-2026-11.md](docs/16-changes-2026-11.md) ve [docs/B-open-items.md](docs/B-open-items.md).
+Canlı kutu doğrulanmış çalışan bir sistemdir; bu kit onun sanitize edilmiş, yeniden üretilebilir hâlidir. Yeni bölümler (fiziksel kumanda köprüsü, tv-guard, Firefox, ARM çeviri, [sesli kumanda](docs/17-voice-key.md)) için ❔ işaretleri geçerlidir. Ayrıntı: [docs/16-changes-2026-11.md](docs/16-changes-2026-11.md) ve [docs/B-open-items.md](docs/B-open-items.md).
 
 ## Gizlilik ve güvenlik
 

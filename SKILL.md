@@ -46,6 +46,7 @@ Each phase ends with a verify gate. Do not start the next phase until the gate p
 | 8 | Web remote: install `tv-remote.py` and the page, LAN-only access rules, audit log, version stamp. Deploy with `tools/deploy-remote.sh <filled-copy>`. | [docs/09-web-remote.md](docs/09-web-remote.md) | "Web remote" |
 | 9 | Security: LAN isolation for Android, tv-guard firewall and checker. Run the inside-Android table. | [docs/10-security.md](docs/10-security.md), [docs/15-tv-guard.md](docs/15-tv-guard.md) | "Security" |
 | 10 | Physical remote bridge (only if the owner has a USB remote): set `REMOTE_MATCH`, test only when nobody watches. | [docs/14-physical-remote.md](docs/14-physical-remote.md) §14.4–14.5 | "Power key and USB remote" |
+| 10b | Voice key (only if the remote has a mic): build whisper.cpp, `tv-whisper` + `tv-voice`, offline Turkish commands/typing. | [docs/17-voice-key.md](docs/17-voice-key.md) | `POST /voice` from LAN = 403; a test phrase returns text in ~3 s |
 | 11 | PC side: ssh alias, HDMI viewer, scrcpy shortcuts, certificate renewal (only if the owner approved a certificate). | [docs/11-pc-viewer.md](docs/11-pc-viewer.md) | "PC" |
 | 12 | Final reboot test and a 60-minute soak. After boot: all units active, one weston, sink = HDMI, remote 200, power key still ignored. | [docs/12-operations.md](docs/12-operations.md) | "Final reboot test" |
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=TV remote voice key (records the remote mic while the key is held -> tv-whisper -> tv-remote /voice)
+After=tv-pipewire-pulse.service tv-whisper.service tv-remote.service
+Wants=tv-whisper.service
+
+[Service]
+EnvironmentFile=/etc/tv/env
+ExecStart=/usr/bin/python3 /usr/local/bin/tv-voice.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

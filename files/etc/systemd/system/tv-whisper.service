@@ -1,0 +1,15 @@
+[Unit]
+Description=Offline speech-to-text for the TV remote voice key (whisper.cpp, unix socket only)
+
+[Service]
+RuntimeDirectory=tv-whisper
+ExecStart=/opt/tv-voice/whisper.cpp/build/bin/whisper-server --host /run/tv-whisper/whisper.sock -m /opt/tv-voice/models/ggml-small-q5_1.bin -l tr -t 3 -ac 384 -bs 1 -nt
+Restart=always
+RestartSec=5
+Nice=5
+# a phrase takes ~2 s of all cores; keep one core free for the TV picture
+CPUQuota=300%
+MemoryMax=1500M
+
+[Install]
+WantedBy=multi-user.target

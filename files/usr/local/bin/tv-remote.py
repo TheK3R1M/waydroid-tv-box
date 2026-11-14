@@ -1044,6 +1044,127 @@ def osd_now(ms=4000):
         print("osd:", e, flush=True)
 
 
+# ---- Voice key (tv-voice.service records the remote's mic while its voice key is held, transcribes it
+# offline on this box and posts the text here over loopback). Commands first, else type into the focused field.
+_NUMW = {"sıfır": "0", "bir": "1", "iki": "2", "üç": "3", "dört": "4", "beş": "5", "altı": "6", "yedi": "7",
+         "sekiz": "8", "dokuz": "9", "on": "10", "yirmi": "20", "otuz": "30", "kırk": "40", "elli": "50",
+         "altmış": "60", "yetmiş": "70", "seksen": "80", "doksan": "90", "yüz": "100"}
+
+
+def _norm(t):
+    t = str(t).replace("I", "ı").replace("İ", "i").lower()
+    t = re.sub(r"[^\wçğıöşü%' ]+", " ", t)
+    t = re.sub(r"(\w)'(\w+)", r"\1 \2", t)            # "youtube'da" -> "youtube da"
+    t = " ".join(_NUMW.get(w, w) for w in t.split())
+    return re.sub(r"\b([1-9]0) ([1-9])\b", lambda m: str(int(m.group(1)) + int(m.group(2))), t)   # "yirmi beş" -> 25
+
+
+def _chkey(name):
+    return _norm(re.sub(r"\s*\(\d+p\)", "", name)).replace(" ", "")
+
+
+def field_focused():
+    """True when Android has a real text field connected to the (invisible) keyboard right now."""
+    out = adb_out("dumpsys input_method")
+    m = re.search(r"mInputStarted=(\w+)", out)
+    e = re.search(r"mInputEditorInfo:\s*\n\s*inputType=0x([0-9a-f]+)", out)
+    return bool(m and m.group(1) == "true" and e and int(e.group(1), 16) != 0)
+
+
+def voice_feedback(msg):
+    if _split["on"]:
+        mpv_ipc(["show-text", "${osd-ass-cc/0}{\\an7\\fs34\\bord3}" + _ass(msg), 3000], timeout=1)
+
+
+_VERB = r"(?:\s+(?:kanalını|kanalı|kanal))?(?:\s+(?:aç|açar mısın|izle|izleyelim|koy|başlat))\s*(?:lütfen)?$"
+
+
+def voice_cmd(text, ip):
+    raw = str(text).strip()[:200]
+    n = _norm(raw)
+    if not n:
+        return False, "boş"
+    def vol(a, v=None, times=1):
+        for _ in range(times):
+            volume(a, v)
+        st = vol_state(); return True, f"ses {st['vol']}%" + (" (sessiz)" if st["muted"] else "")
+    if re.search(r"\bses", n):
+        d = re.search(r"\b(\d{1,3})\b", n)
+        if re.search(r"\b(kapat|kes|sustur)\b", n) or n in ("sessiz", "sessize al"):
+            pactl("set-sink-mute", SINK, "1"); return True, "ses kapatıldı"
+        if d:
+            return vol("set", int(d.group(1)))
+        if "normal" in n:
+            return vol("normal")
+        if re.search(r"\b(kıs|kız|azalt|düşür|alçalt)", n):     # recogniser often hears "kıs" as "kız"
+            pactl("set-sink-mute", SINK, "0"); return vol("down", times=2)
+        if re.search(r"\b(aç|yükselt|artır|arttır|yükseğe)", n):
+            pactl("set-sink-mute", SINK, "0"); return vol("up", times=2)
+    if n in ("sessiz", "sustur"):
+        pactl("set-sink-mute", SINK, "1"); return True, "ses kapatıldı"
+    if n in ("geri", "geri dön", "geri git"):
+        if _split["on"]:
+            return split_off(to_single=True), "geri"
+        return android("input keyevent 4"), "geri"
+    if re.fullmatch(r"ana (ekran|sayfa|menü)( git| aç| dön)?", n):
+        if _split["on"]:
+            split_off(to_single=False)
+        return android("input keyevent 3"), "ana ekran"
+    if re.fullmatch(r"(durdur|duraklat|devam( et)?|oynat|başlat)", n):
+        return android(f"input keyevent {KEYS['play']}"), "oynat/duraklat"
+    if re.fullmatch(r"(ekranı böl|bölünmüş ekran|ikili ekran|ekranı ikiye böl)( aç)?", n):
+        return split_on(), "bölünmüş ekran"
+    if re.fullmatch(r"tek ekran( yap| aç)?", n) and _split["on"]:
+        return split_off(to_single=True), "tek ekran"
+    chs = channels()
+    step = None
+    if re.search(r"(sonraki|ileri|aşağı) kanal|kanal (ileri|aşağı|sonraki)", n):
+        step = 1
+    elif re.search(r"(önceki|yukarı) kanal|kanal (geri|yukarı|önceki)", n):
+        step = -1
+    if step and chs:
+        sd = _split["side"] if _split["mode"] == "split" else "left"
+        i = (base_idx(sd) + step) % len(chs)
+        _want[sd] = i; _ch["i"] = i
+        ok = split_set(("ch", i), sd) if _split["on"] else watch_single(("ch", i))
+        osd_now()
+        return ok, f"kanal {chs[i][0]}"
+    m = re.fullmatch(r"(?:youtube|yutup|you tube)(?: da| de)?\s+(.+?)(?:\s+(?:ara|arat|bul|aç))?", n)
+    if m:
+        q = m.group(1)
+        from urllib.parse import quote
+        if _split["on"]:
+            split_off(to_single=False)
+        url = "https://www.youtube.com/results?search_query=" + quote(q)
+        return android(f"am start -a android.intent.action.VIEW -d '{url}' org.smarttube.stable", timeout=8), f"YouTube'da ara: {q}"
+    # channel by name ("trt 1 aç", "show tv", "kanal d'yi aç")
+    if chs:
+        has_verb = bool(re.search(_VERB, n))
+        cand = re.sub(_VERB, "", n)
+        cand = re.sub(r"\b(yi|yı|yu|yü|i|ı|u|ü)$", "", cand).strip()
+        key = cand.replace(" ", "")
+        hit = None
+        if key:
+            for i, (name, _u) in enumerate(chs):
+                if _chkey(name) == key:
+                    hit = i; break
+            if hit is None and len(key) >= 3:         # "kanaldyeiyi" -> Kanal D; "star" -> Star TV (longest wins)
+                best = 0
+                for i, (name, _u) in enumerate(chs):
+                    k = _chkey(name)
+                    if (k.startswith(key) or (key.startswith(k) and len(k) >= 3)) and len(k) > best:
+                        hit, best = i, len(k)
+        if hit is not None and (has_verb or _split["on"] or not field_focused()):
+            sd = _split["side"] if _split["mode"] == "split" else "left"
+            _want[sd] = hit; _ch["i"] = hit
+            ok = split_set(("ch", hit), sd) if _split["on"] else watch_single(("ch", hit))
+            osd_now()
+            return ok, f"kanal {chs[hit][0]}"
+    if not _split["on"] and field_focused():
+        return type_full(raw, ""), f"yazdı: {raw}"
+    return False, f"anlaşılmadı: {raw}"
+
+
 # Physical USB remote (air mouse) while a live channel plays: the fullscreen host mpv has keyboard focus and
 # ignores keys (--no-input-default-bindings), so its keys never reach Android. Read the remote's evdev nodes
 # (shared, not grabbed: Weston still gets them) and replay them as remote-page actions over loopback, so they
@@ -1195,6 +1316,23 @@ class H(http.server.BaseHTTPRequestHandler):
         u = urlparse(self.path)
         parts = u.path.strip("/").split("/")
         ip = self.client_address[0]
+        if parts and parts[0] == "voice":
+            if not ipaddress.ip_address(ip).is_loopback:
+                return self.send(403)
+            if parts == ["voice", "listen"]:
+                voice_feedback("● Dinliyorum…"); return self.send(200)
+            if parts == ["voice", "fail"]:
+                voice_feedback("Ses anlaşılamadı"); log_action(ip, "sesli komut: duyulmadı"); return self.send(200)
+            try:
+                n = int(self.headers.get("Content-Length", "0"))
+                text = str(json.loads(self.rfile.read(min(n, 4000)) or b"{}").get("text", ""))
+                ok, what = voice_cmd(text, ip)
+            except Exception as e:
+                ok, what = False, f"hata {e}"
+            if not ok or what.startswith(("anlaşılmadı", "ses ")):
+                voice_feedback(("" if ok else "✗ ") + what)
+            log_action(ip, f"sesli: «{text[:80]}» → {what}" + ("" if ok else " (BAŞARISIZ)"))
+            return self.send_json({"ok": bool(ok), "what": what})
         if parts == ["mouse"]:
             m = {}
             try:
