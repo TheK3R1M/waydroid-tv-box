@@ -119,3 +119,17 @@ drawings, DejaVu Sans), not `show-text` (which looks like terminal text).
 - **Pitfall:** an `osd-overlay` belongs to the IPC client that created it and disappears when that connection
   closes. A connect-send-close helper shows nothing; keep one persistent IPC connection (with a reader thread that
   discards replies/events) and reconnect when mpv restarts. Verified on the real HDMI output (`tvshot`).
+
+## 14.7 "Kanallar" tile on the Android home screen ✅
+
+Live TV runs in the host mpv, so Android has no app for it. `android/kanallar/` builds a tiny **code-less** APK
+(`org.tvbox.kanallar`: manifest + banner + icon, activity = the framework's own `android.app.Activity` with a
+transparent theme, `hasCode=false`). It shows up as a normal TV app tile (Projectivy "TV Apps" row).
+
+- Build on the host: `sh android/kanallar/build.sh /path/to/android/kanallar` (aapt2 + zipalign + apksigner +
+  `android.jar` from Google's platform-33 zip; signing key generated once in `/root/tv-keys`, never committed),
+  then `adb install -r kanallar.apk`.
+- tv-remote `_tile_watch()` follows `adb logcat -s ActivityTaskManager:I`; a `START u0 ... cmp=org.tvbox.kanallar/`
+  line opens live TV (last channel) with the channel list and force-stops the tile app.
+- Android never connects to the host for this, so the LAN isolation (docs/10) stays closed.
+- Verified: starting the tile -> channel playing + list open on the HDMI output in ~9 s; Back, Back -> home.

@@ -655,7 +655,7 @@ APPS = {"youtube": "org.smarttube.stable/com.liskovsoft.smartyoutubetv2.tv.ui.ma
         "tv": "com.example.livetv/.MainActivity",     # placeholder: set a legal live-TV app of your choice, or delete
         "web": "org.mozilla.firefox/.App"}
 BROWSER = "org.mozilla.firefox/org.mozilla.fenix.IntentReceiverActivity"   # replaces TV Bro (hard to drive with the remote)
-APP_NAMES = {"org.smarttube.stable": "YouTube", "com.example.livetv": "Canlı TV",
+APP_NAMES = {"org.tvbox.kanallar": "Kanallar", "org.smarttube.stable": "YouTube", "com.example.livetv": "Canlı TV",
              "com.phlox.tvwebbrowser": "Tarayıcı (eski)", "org.mozilla.firefox": "Tarayıcı", "com.spocky.projengmenu": "Ana ekran",
              "org.xbmc.kodi": "Canlı TV (Kodi)", "com.android.tv.settings": "Ayarlar"}
 ADB = "__ANDROID_IP__:5555"
@@ -1501,6 +1501,37 @@ def ui_choice_key(key):
         ok, what = intent_run(kind, _choice["text"], _choice.get("n", ""), channels())
         return ok, "seçim: " + what
     ui_hide(); return True, "seçim kapandı"
+
+
+# ---- "Kanallar" tile on the Android home screen (org.tvbox.kanallar, a code-less APK): Android stays isolated
+# from the host network, so the host watches Android's activity log over adb and opens live TV + the channel
+# list when that tile is started, then closes the (transparent) tile app again.
+TILE_PKG = "org.tvbox.kanallar"
+
+
+def _tile_watch():
+    last = 0
+    while True:
+        try:
+            subprocess.run(["adb", "connect", ADB], capture_output=True, timeout=10)
+            p = subprocess.Popen(["adb", "-s", ADB, "logcat", "-T", "1", "-s", "ActivityTaskManager:I"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="ignore")
+            for line in p.stdout:
+                if "START u0" in line and f"cmp={TILE_PKG}/" in line and time.time() - last > 3:
+                    last = time.time()
+                    def go():
+                        _req.dev = "Kanallar uygulaması"
+                        ok = tv_open()
+                        log_action("127.0.0.1", "Kanallar uygulaması → canlı TV + kanal listesi" + ("" if ok else " (BAŞARISIZ)"))
+                        android(f"am force-stop {TILE_PKG}", timeout=5)
+                    threading.Thread(target=go, daemon=True).start()
+            p.wait()
+        except Exception as e:
+            print("tile watch:", e, flush=True)
+        time.sleep(5)
+
+
+threading.Thread(target=_tile_watch, daemon=True).start()
 
 
 # Physical USB remote (air mouse) while a live channel plays: the fullscreen host mpv has keyboard focus and

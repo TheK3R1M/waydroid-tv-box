@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Kanallar" launcher tile. No code at all: the activity is the framework's own android.app.Activity with a
+     transparent theme. tv-remote on the host watches Android's activity log over adb; when this package is
+     started it opens live TV (host mpv) with the on-TV channel list and closes this app again.
+     Android never talks to the host network, so the LAN isolation stays intact. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.tvbox.kanallar" android:versionCode="1" android:versionName="1.0">
+    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="33" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <application android:label="Kanallar" android:icon="@mipmap/icon" android:banner="@drawable/banner"
+        android:hasCode="false" android:allowBackup="false">
+        <activity android:name="android.app.Activity" android:exported="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar.Fullscreen"
+            android:excludeFromRecents="true" android:noHistory="true" android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
