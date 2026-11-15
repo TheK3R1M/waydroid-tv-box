@@ -94,3 +94,28 @@ Benchmark on the reference box (46 Turkish phrases, 15 intents, model alone):
 
 Most model misses ("sesi kapat", "sustur", "YouTube", "Firefox", "durdur") are caught earlier by the rules, so
 rules + model handle nearly all test phrases. FunctionGemma needs task fine-tuning before it is useful here.
+
+## 17.7 Turkish parsing and recogniser prompt ✅ offline
+
+- `files/usr/local/bin/tv-nlu.py` (pure functions, runs before the model): strips Turkish case suffixes glued
+  to names (`YouTube'dan`, `youtubedan`, `yutuptan`, `Kanal D'ye`, `Netfly'ı`, `yediyi`), knows frequent
+  mis-hearings of app names (`yutup`, `Smart TV` -> YouTube), and finds YouTube requests in any word order.
+  - `YouTube'dan teneke kafalar aç` / `... izle` / `dinle` -> plays the **first result** (tv-remote reads the
+    videoId from YouTube's results page on the host and sends a watch link to SmartTube).
+  - `YouTube'da ... ara` / `bul` -> shows the results.
+  - `Kodi aç`, `VLC aç`, `ayarları aç` -> launches the app (resolved via `cmd package resolve-activity`).
+    Box-specific apps go in `/etc/tv/voice-apps.json` (`{"key": ["package", ["spoken", "forms"], "Name"]}`),
+    not in the script.
+  - While YouTube is in front, `teneke kafalar aç` alone also plays on YouTube.
+- Whisper prompt = a natural Turkish command sentence. Measured with 25 TTS phrases (+ noise, band-limited):
+
+| whisper.cpp config | similarity | exact | median |
+|---|---|---|---|
+| small q5_1, prompt = list of channel names | 0.914 | 11/25 | 3.7 s |
+| small q5_1, prompt = natural command sentence | 0.958 | 17/25 | 4.1 s |
+| large-v3-turbo q5_0, `-ac 384` | 0.693 (repeats) | 5/25 | 26 s |
+
+  The channel-name list made whisper answer in capitals and invent channel names; turbo is too slow on a 4-core
+  embedded Ryzen and repeats itself with a reduced audio context.
+- Quiet mics: the clip is peak-normalised before recognition. The last 20 clips are kept in
+  `/run/tv-voice/clips` (RAM only) to tune with real voices; delete the `keep_clip` call to disable.

@@ -2,7 +2,7 @@
 """Spike TV web remote: http://<spike>:8090 and https://__TV_HOSTNAME__ (LAN-only, whitelisted actions,
 no shell injection). v16: phone mouse (touchpad + gyro), HTTPS (gyro needs a secure page), latest-wins channel
 changes, cached HLS variants, instant split side switch."""
-import base64, http.server, ipaddress, json, os, re, socket, ssl, subprocess, threading, time
+import base64, http.server, ipaddress, json, os, re, socket, ssl, subprocess, threading, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, parse_qs
 
@@ -1253,6 +1253,61 @@ def voice_feedback(msg):
 _VERB = r"(?:\s+(?:kanalını|kanalı|kanal))?(?:\s+(?:aç|açar mısın|izle|izleyelim|koy|başlat))\s*(?:lütfen)?$"
 
 
+APPS_PKG_YT = "org.smarttube.stable"
+_nlu_mod = {"m": None, "mt": 0}
+
+
+def _nlu():
+    f = "/usr/local/bin/tv-nlu.py"
+    mt = os.path.getmtime(f)
+    if _nlu_mod["m"] is None or mt != _nlu_mod["mt"]:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tv_nlu", f)
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        _nlu_mod.update(m=m, mt=mt)
+    return _nlu_mod["m"]
+
+
+def yt_first(q):
+    """videoId of the first normal result (no Shorts/ads) from YouTube's own results page, or None."""
+    from urllib.parse import quote
+    try:
+        req = urllib.request.Request("https://www.youtube.com/results?hl=tr&gl=TR&search_query=" + quote(q),
+                                     headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/124 Safari/537.36",
+                                              "Accept-Language": "tr-TR,tr;q=0.9"})
+        html = urllib.request.urlopen(req, timeout=6).read(1_500_000).decode("utf-8", "ignore")
+        m = re.search(r'"videoRenderer":\{"videoId":"([A-Za-z0-9_-]{11})"', html)
+        return m.group(1) if m else None
+    except Exception as e:
+        print("yt_first:", e, flush=True); return None
+
+
+def yt_go(q, play=True):
+    """'YouTube'dan X aç' -> play the first result; 'YouTube'da X ara' -> show the results."""
+    from urllib.parse import quote
+    if _split["on"]:
+        split_off(to_single=False)
+    _focus["t"] = 0
+    vid = yt_first(q) if play else None
+    url = f"https://www.youtube.com/watch?v={vid}" if vid else "https://www.youtube.com/results?search_query=" + quote(q)
+    ok = android(f"am start -a android.intent.action.VIEW -d '{url}' {APPS_PKG_YT}", timeout=8)
+    return ok, (f"YouTube'da oynat: {q}" if vid else f"YouTube'da ara: {q}")
+
+
+def app_open(pkg):
+    if not re.fullmatch(r"[A-Za-z0-9_.]+", pkg):
+        return False
+    if _split["on"]:
+        split_off(to_single=False)
+    _focus["t"] = 0
+    out = adb_out(f"cmd package resolve-activity --brief -c android.intent.category.LEANBACK_LAUNCHER {pkg}")
+    comp = next((l.strip() for l in out.splitlines() if l.strip().startswith(pkg + "/")), None)
+    if not comp:
+        out = adb_out(f"cmd package resolve-activity --brief -c android.intent.category.LAUNCHER {pkg}")
+        comp = next((l.strip() for l in out.splitlines() if l.strip().startswith(pkg + "/")), None)
+    return android(f"am start -n {comp}", timeout=8) if comp else False
+
+
 def voice_cmd(text, ip):
     raw = str(text).strip()[:200]
     n = _norm(raw)
@@ -1286,12 +1341,28 @@ def voice_cmd(text, ip):
         return android("input keyevent 3"), "ana ekran"
     if re.fullmatch(r"(durdur|duraklat|devam( et)?|oynat|başlat)", n):
         return android(f"input keyevent {KEYS['play']}"), "oynat/duraklat"
-    if re.fullmatch(r"(ekranı böl|bölünmüş ekran|ikili ekran|ekranı ikiye böl)( aç)?", n):
+    if re.fullmatch(r"(ekranı böl|bölünmüş ekran|ikili ekran|ekranı (ikiye|2 ?ye|2) böl|iki kanal(ı)? (birden|beraber|aynı anda) (izle|aç)\w*)( aç)?", n):
         return split_on(), "bölünmüş ekran"
     if re.fullmatch(r"tek ekran( yap| aç)?", n) and _split["on"]:
         return split_off(to_single=True), "tek ekran"
     if re.fullmatch(r"(kanallar|kanal listesi|canlı tv|canlı yayın|televizyon|tv)( aç| göster| listesi)?", n):
         return tv_open(), "kanal listesi"
+    try:                                               # Turkish suffix-aware parser (tv-nlu.py)
+        r = _nlu().parse(raw, [c[0] for c in channels()],
+                         APPS_PKG_YT if (not _split["on"] and focus_app() == "YouTube") else None)
+    except Exception as e:
+        print("nlu:", e, flush=True); r = {"act": None}
+    if r["act"] in ("yt_play", "yt_search"):
+        return yt_go(r["q"], play=r["act"] == "yt_play")
+    if r["act"] == "app":
+        return app_open(r["pkg"]), f"uygulama {r['name']}"
+    if r["act"] == "channel":
+        chs = channels(); hit = r["i"]
+        sd = _split["side"] if _split["mode"] == "split" else "left"
+        _want[sd] = hit; _ch["i"] = hit
+        ok = split_set(("ch", hit), sd) if _split["on"] else watch_single(("ch", hit))
+        osd_now()
+        return ok, f"kanal {chs[hit][0]}"
     for pat, app in ((r"(youtube|yutup|you tube|smart ?tv|smart ?tube)", "youtube"),
                      (r"(firefox|tarayıcı|internet|web)", "web")):
         if re.fullmatch(pat + r"( aç| uygulaması| uygulamasını aç|ı aç|u aç|yu aç|yi aç)?", n):
@@ -1411,13 +1482,10 @@ def intent_run(kind, raw, n, chs):
     if kind == "mute":
         pactl("set-sink-mute", SINK, "1"); return True, "ses kapatıldı"
     if kind == "yt_search":
-        from urllib.parse import quote
-        q = re.sub(r"\b(youtube|yutup|da|de|dan|den|ara|arat|bul|aç|izle|video|videosu|videoları)\b", " ", n)
-        q = " ".join(q.split()) or n
-        if _split["on"]:
-            split_off(to_single=False)
-        url = "https://www.youtube.com/results?search_query=" + quote(q)
-        return android(f"am start -a android.intent.action.VIEW -d '{url}' org.smarttube.stable", timeout=8), f"YouTube'da ara: {q}"
+        m = _nlu()
+        toks = m.norm(raw).split()
+        q = m._clean_query([t for t in toks if not m.stem(t, m.YOUTUBE)]) or raw
+        return yt_go(q, play=not any(t in m.SEARCH_VERBS for t in toks))
     if kind in ("yt_open", "web"):
         if _split["on"]:
             split_off(to_single=False)

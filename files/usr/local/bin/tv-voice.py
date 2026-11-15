@@ -4,7 +4,7 @@ remote's own USB mic is transcribed on this box by whisper.cpp (tv-whisper.servi
 port, no cloud) and the text is posted to tv-remote over loopback (POST /voice {text}); tv-remote runs a
 command ("TRT 1 aç", "sesi kıs", "YouTube'da ... ara") or types the text into the focused Android field.
 A very short tap (remotes that send press+release at once) records a fixed window instead.
-Audio stays in memory only; nothing is written to disk."""
+Audio stays in memory; the last 20 clips are kept in /run (RAM, wiped on reboot) for tuning."""
 import array, http.client, io, json, re, select, socket, subprocess, threading, time, uuid, wave
 
 import evdev
@@ -40,15 +40,38 @@ class UnixHTTP(http.client.HTTPConnection):
 
 
 def prompt():
-    """Channel names as a hint so the recogniser spells them like the channel list."""
-    names = []
+    """A natural Turkish command sentence as context. Measured on the reference box: a bare list of channel names
+    made whisper answer in CAPITALS and hallucinate channel names (0.914 similarity, 11/25 exact); this sentence
+    style gave 0.958, 17/25 exact at the same speed."""
+    return ("Televizyon kumandası sesli komutları: YouTube'dan video aç, YouTube'da şarkı ara, Netfly'ı aç, "
+            "kanal listesini göster, sesi kıs, TRT 1'i aç, Kanal D'ye geç, Show TV, ATV, Star TV, Now, Habertürk.")
+
+
+CLIPS = "/run/tv-voice/clips"      # RAM only (tmpfs), last KEEP clips, for tuning; gone on reboot
+KEEP = 20
+
+
+def keep_clip(pcm, text):
     try:
-        for line in open(CHANNELS_FILE, encoding="utf-8"):
-            if line.startswith("#EXTINF"):
-                names.append(re.sub(r"\s*\[.*?\]|\s*\(\d+p\)", "", line.split(",")[-1]).strip())
-    except Exception:
-        pass
-    return ", ".join(names[:12]) + "."   # longer prompts slow every phrase down
+        import os
+        os.makedirs(CLIPS, mode=0o700, exist_ok=True)
+        name = time.strftime("%H%M%S") + "_" + re.sub(r"[^\w]+", "_", text)[:40] + ".wav"
+        with wave.open(f"{CLIPS}/{name}", "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(pcm)
+        for old in sorted(os.listdir(CLIPS))[:-KEEP]:
+            os.remove(f"{CLIPS}/{old}")
+    except Exception as e:
+        print("keep_clip:", e, flush=True)
+
+
+def normalize(pcm):
+    """Quiet remote mics: scale so the peak sits near 70 % (whisper's log-mel is level sensitive)."""
+    a = array.array("h"); a.frombytes(pcm[: len(pcm) // 2 * 2])
+    peak = max((abs(x) for x in a), default=0)
+    if 0 < peak < 16000:
+        g = min(8.0, 23000 / peak)
+        a = array.array("h", (max(-32767, min(32767, int(x * g))) for x in a))
+    return a.tobytes()
 
 
 def transcribe(pcm):
@@ -124,11 +147,13 @@ def main():
             if secs < 0.4 or peak < 300:
                 print(f"too short/quiet {secs:.1f}s peak={peak}", flush=True); post("/voice/fail"); return
             t = time.time()
+            pcm = normalize(pcm)
             try:
                 text = transcribe(pcm)
             except Exception as e:
                 print("whisper:", e, flush=True); post("/voice/fail"); return
             print(f"{secs:.1f}s audio -> {time.time() - t:.1f}s: {text!r}", flush=True)
+            keep_clip(pcm, text)
             post("/voice", {"text": text}) if text and not text.startswith("[") else post("/voice/fail")
 
     while True:
