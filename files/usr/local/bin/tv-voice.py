@@ -47,6 +47,8 @@ def prompt():
             "kanal listesini göster, sesi kıs, TRT 1'i aç, Kanal D'ye geç, Show TV, ATV, Star TV, Now, Habertürk.")
 
 
+HALLU = re.compile(r"(allah|altyazı m\.?k|izlediğiniz için teşekkür(ler| ederim)|abone ol\w*.*|"
+                   r"altyazı\w*.*|teşekkürler|music|müzik)")
 CLIPS = "/run/tv-voice/clips"      # RAM only (tmpfs), last KEEP clips, for tuning; gone on reboot
 KEEP = 20
 
@@ -155,7 +157,9 @@ def main():
                 print("whisper:", e, flush=True); post("/voice/fail"); return
             print(f"{secs:.1f}s audio -> {time.time() - t:.1f}s: {text!r}", flush=True)
             keep_clip(pcm, text)
-            post("/voice", {"text": text}) if text and not text.startswith("[") else post("/voice/fail")
+            if HALLU.fullmatch(text.strip(" .,!…").lower()):          # whisper's stock phrases on silence/noise
+                print("hallucination dropped", flush=True); text = ""
+            post("/voice", {"text": text}) if text and not text.startswith(("[", "(")) else post("/voice/fail")
 
     while True:
         if time.time() - last_scan > 5:
