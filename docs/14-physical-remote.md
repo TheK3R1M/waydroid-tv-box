@@ -133,3 +133,9 @@ transparent theme, `hasCode=false`). It shows up as a normal TV app tile (Projec
   line opens live TV (last channel) with the channel list and force-stops the tile app.
 - Android never connects to the host for this, so the LAN isolation (docs/10) stays closed.
 - Verified: starting the tile -> channel playing + list open on the HDMI output in ~9 s; Back, Back -> home.
+
+## 14.8 Volume and list timing on live TV ✅
+
+- Android's own volume panel is hidden behind the host mpv, so volume keys during live TV draw an Android-TV-style
+  vertical bar on the right (mpv overlay, 2.5 s, composed on top of whatever overlay is showing; orange above 100 %).
+- The channel list closes after 6 s without a key (was 12 s, felt too long).

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Voice-assistant bar overlay. No launcher entry; driven by the host over adb (see Bar.java). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.tvbox.asistan" android:versionCode="4" android:versionName="1.1">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="33" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <application android:label="TV Asistan" android:allowBackup="false">
+        <receiver android:name=".Bar" android:exported="true" android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

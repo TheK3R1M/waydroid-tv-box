@@ -146,6 +146,7 @@ def main():
             secs, peak = len(a) / 16000, max((abs(x) for x in a), default=0)
             if secs < 0.4 or peak < 300:
                 print(f"too short/quiet {secs:.1f}s peak={peak}", flush=True); post("/voice/fail"); return
+            post("/voice/think")
             t = time.time()
             pcm = normalize(pcm)
             try:

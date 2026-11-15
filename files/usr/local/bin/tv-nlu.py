@@ -14,7 +14,7 @@ mis-hearings of the app names are listed explicitly; fuzzy matching is only used
 import difflib, re
 
 # case/possessive suffixes that follow a name (longest first)
-SUFFIXES = sorted("da de ta te dan den tan ten ı i u ü yı yi yu yü ya ye a e yla yle la le nın nin nun nün "
+SUFFIXES = sorted("da de ta te dan den tan ten an en ı i u ü yı yi yu yü ya ye a e yla yle la le nın nin nun nün "
                   "ın in un ün yı yi ndan nden na ne nı ni nu nü nda nde".split(), key=len, reverse=True)
 PLAY_VERBS = {"aç", "açar", "açarmısın", "açsana", "açın", "izle", "izleyelim", "izlet", "izlemek", "oynat", "oynatır",
               "koy", "koyar", "başlat", "dinle", "dinleyelim", "çal", "çalar", "göster", "getir"}
@@ -29,18 +29,24 @@ APPS = {
     "youtube": ("org.smarttube.stable", YOUTUBE | {"smarttv"}, "YouTube"),
     "kodi": ("org.xbmc.kodi", {"kodi", "kodiyi", "kodu"}, "Kodi"),
     "vlc": ("org.videolan.vlc", {"vlc", "velece", "vilisi"}, "VLC"),
-    "web": ("org.mozilla.firefox", {"firefox", "tarayıcı", "internet", "web", "fayrfoks", "chrome", "krom"}, "Tarayıcı"),
+    "web": ("org.mozilla.firefox", {"firefox", "tarayıcı", "internet", "web", "fayrfoks", "chrome", "krom", "firefoks",
+                                    "firebox", "fireboks", "firepoks", "fayırfoks"}, "Tarayıcı"),
     "settings": ("com.android.tv.settings", {"ayarlar", "ayarları", "ayar"}, "Ayarlar"),
     "playstore": ("com.android.vending", {"playstore", "googleplay", "markete", "market"}, "Play Store"),
     "lemuroid": ("com.swordfish.lemuroid", {"lemuroid", "oyunlar", "emülatör"}, "Lemuroid"),
     "files": ("com.lonelycatgames.Xplore", {"xplore", "dosyalar", "dosya"}, "Dosyalar"),
 }
 # Box-specific apps (not shipped): /etc/tv/voice-apps.json  {"key": ["package", ["spoken", "forms"], "Name"]}
+# Optional 4th element: {"search": "<scheme>:///search?search={q}", "addon_scheme": "<scheme>"} for apps that take
+# a search deep link or install add-ons from "<scheme>://.../manifest.json" links.
+APP_EXTRA = {}
 try:
     import json as _json
-    for _k, (_p, _f, _n) in _json.load(open("/etc/tv/voice-apps.json", encoding="utf-8")).items():
-        APPS[_k] = (_p, set(_f), _n)
-except (OSError, ValueError):
+    for _k, _v in _json.load(open("/etc/tv/voice-apps.json", encoding="utf-8")).items():
+        APPS[_k] = (_v[0], set(_v[1]), _v[2])
+        if len(_v) > 3:
+            APP_EXTRA[_k] = _v[3]
+except (OSError, ValueError, IndexError):
     pass
 _NUMW = {"sıfır": "0", "bir": "1", "iki": "2", "üç": "3", "dört": "4", "beş": "5", "altı": "6", "yedi": "7",
          "sekiz": "8", "dokuz": "9", "on": "10"}
@@ -54,7 +60,7 @@ def norm(t):
     t = re.sub(r"\byou tube\b|\byu tub\b|\byu tube\b", "youtube", t)
     t = re.sub(r"\bsmart (tube|tub|tv)\b", r"smart\1", t)
     t = re.sub(r"\bgoogle play\b|\bplay store\b", "playstore", t)
-    t = re.sub(r"\bbeleş ?ti ?vi\b|\bbeleş tv\b", "beleştivi", t)
+    t = re.sub(r"\b(beleş|bereş|beles|belleş) ?(ti ?vi|tivi|tv|tevi|televizyon)", "beleştivi", t)
     return " ".join(t.split())
 
 
@@ -136,6 +142,26 @@ def find_channel(tokens, channel_names, fuzzy=True):
     return best
 
 
+SRC_SUFFIX = ("dan", "den", "tan", "ten", "da", "de", "ta", "te", "an", "en", "ndan", "nden", "nda", "nde")
+
+
+def _source_app(tokens):
+    """'Firefox'tan YouTube aç' / 'Kodi'den film aç' -> (app key, query tokens) when an app name carries an
+    ablative/locative suffix (glued or after an apostrophe) and something follows."""
+    for i, t in enumerate(tokens[:-1]):
+        for key, (_p, forms, _n) in APPS.items():
+            base = stem(t, forms)
+            if not base:
+                continue
+            nxt = tokens[i + 1]
+            glued = t.lstrip("'") != base and t.lstrip("'")[len(base):] in SRC_SUFFIX
+            split_suffix = nxt.startswith("'") and nxt[1:] in SRC_SUFFIX or nxt in SRC_SUFFIX
+            if glued or split_suffix:
+                rest = tokens[i + (2 if split_suffix else 1):]
+                return key, rest
+    return None, None
+
+
 def parse(text, channel_names=(), current_app=None):
     n = norm(text)
     tokens = n.split()
@@ -143,6 +169,12 @@ def parse(text, channel_names=(), current_app=None):
         return {"act": None}
     has_play = any(t in PLAY_VERBS for t in tokens)
     has_search = any(t in SEARCH_VERBS for t in tokens)
+    src, rest = _source_app(tokens)
+    if src and src != "youtube":
+        q = _clean_query(rest)
+        if q:
+            return {"act": "in_app", "app": src, "pkg": APPS[src][0], "name": APPS[src][2], "q": q,
+                    "search": has_search and not has_play, "ch": find_channel(rest, channel_names)}
     i, key = _app_of(tokens)
     if key == "youtube":
         q = _clean_query(tokens[:i] + tokens[i + 1:])

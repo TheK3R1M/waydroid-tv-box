@@ -119,3 +119,39 @@ rules + model handle nearly all test phrases. FunctionGemma needs task fine-tuni
   embedded Ryzen and repeats itself with a reduced audio context.
 - Quiet mics: the clip is peak-normalised before recognition. The last 20 clips are kept in
   `/run/tv-voice/clips` (RAM only) to tune with real voices; delete the `keep_clip` call to disable.
+
+## 17.8 Assistant bar, dictation and "<app>'dan …" commands ✅ (offline-tested, real voice ❔)
+
+**Visible state (like Google Assistant).** `tv-voice` posts `/voice/listen` on key press and `/voice/think` on
+release; tv-remote then shows a bar with four coloured dots: bouncing = listening, pulsing = thinking, still =
+answer (the recognised sentence + what was done), red = not understood.
+- On Android: `android/asistan/` builds a tiny overlay APK (`org.tvbox.asistan`, javac + d8 + aapt2 on the host,
+  same key as the Kanallar tile). Its receiver is protected by `android.permission.DUMP` (only the adb shell
+  holds it) and draws a `TYPE_APPLICATION_OVERLAY` window that is **not focusable**, so a search field keeps
+  focus while you dictate. One-time setup: `appops set org.tvbox.asistan SYSTEM_ALERT_WINDOW allow` and
+  `cmd deviceidle whitelist +org.tvbox.asistan`.
+  Do not add `FLAG_NOT_TOUCHABLE`: Android 12+ caps pass-through overlays at 80 % opacity (unreadable on video).
+- On live TV (host mpv): the same bar as an mpv osd-overlay.
+
+**Dictation first.** When a text field is focused (search box, address bar), speech is typed verbatim. Only
+these are commands there: `ara / tamam / git` (submit), `sil / temizle` (clear), `geri / kapat`, and explicit
+`<app>'dan …` phrases. Saying "YouTube" in Firefox's search box types "YouTube" instead of opening an app.
+
+**`<app>'dan / 'da <x> aç|ara`** (tv-nlu `_source_app`): the app name carries an ablative/locative suffix.
+- Firefox: `Firefox'tan YouTube aç` = youtube.com in Firefox; `Firefox'tan Radio Garden aç` = first web result
+  (DuckDuckGo `!`); `… ara` = web search. While Firefox is in front, "YouTube aç" also stays in Firefox.
+  Set Firefox's *Open links in apps* to **Never** (`pref_key_open_links_in_apps` =
+  `pref_key_open_links_in_apps_never` in `fenix_preferences.xml`), otherwise Firefox itself offers to hand
+  youtube.com over to the YouTube app.
+- Apps with a search deep link or add-on links are configured in `/etc/tv/voice-apps.json` (4th element:
+  `{"search": "<scheme>:///search?search={q}", "addon_scheme": "<scheme>"}`), not in code.
+- Apps that can't be driven from outside (no deep links, state-dependent menus) get the channel in the host's
+  own channel list instead, and the bar says so. Blind D-pad automation of such apps paused and zapped the
+  family's stream in tests; don't ship it.
+
+**Add-on links.** The phone remote's "Link gönder" routes `…/manifest.json` (or `<addon_scheme>://…`) links to
+the app configured with `addon_scheme`, which opens its own install page.
+
+**Recogniser model check with real household clips** (20 clips kept in RAM, see 17.7): a Turkish fine-tune of
+whisper-small was *not* better than stock small with the natural prompt (spelled names phonetically:
+"Atevi", "Firefoks", "Yutup"); most real failures were parsing/context, fixed above.

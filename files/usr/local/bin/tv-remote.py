@@ -644,6 +644,15 @@ def prune(keep=6):
 
 def open_link(url):
     url = url.strip()
+    try:                                    # add-on links ("<scheme>://.../manifest.json") -> the app that installs them
+        addon = next(((k, x["addon_scheme"]) for k, x in _nlu().APP_EXTRA.items() if x.get("addon_scheme")), None)
+    except Exception:
+        addon = None
+    if addon and re.match(r"^[a-z]+://[\w\-.:/?=&%~+@,;#!]+$", url) and (
+            url.startswith(addon[1] + "://") or re.search(r"/manifest\.json(\?|$)", url)):
+        su = re.sub(r"^https?://", addon[1] + "://", url)
+        name = _nlu().APPS[addon[0]][2]
+        return android(f"am start -a android.intent.action.VIEW -d '{su}' {_nlu().APPS[addon[0]][0]}", timeout=8), f"{name} eklentisi"
     if not re.match(r"^https?://[\w\-.:/?=&%~+@,;#!]+$", url):
         return False, "geçersiz link"
     if re.search(r"(youtube\.com|youtu\.be)/", url):
@@ -1037,7 +1046,7 @@ def _ass(t):
 
 # ---- On-TV overlay (drawn by the host mpv with `osd-overlay`, ASS events in 1920x1080 coordinates).
 # Banner = TV-style info bar on every channel change; List = channel browser opened with OK, moved with ▲▼
-# (no zapping while browsing), OK tunes, ◀/Back closes. Auto-hides (banner 4 s, list 12 s idle).
+# (no zapping while browsing), OK tunes, ◀/Back closes. Auto-hides (banner 4 s, list 6 s idle).
 ACCENT = "F26D3D"          # BGR of #3d6df2 (same blue as the phone remote)
 PANEL = "141210"
 FONT = "DejaVu Sans"
@@ -1073,7 +1082,41 @@ def _ovc_drain(sock):
         pass
 
 
+_vol_ui = {"until": 0.0, "base": [], "shown": False}
+
+
+def _vol_elems():
+    st = vol_state(); v = st["vol"] or 0; muted = st["muted"]
+    x, y, w, h = 1786, 250, 96, 560
+    L = [_rect(x, y, w, h, PANEL, 0x18, 48)]
+    bx, by, bw, bh = x + 36, y + 96, 24, h - 190
+    L.append(_rect(bx, by, bw, bh, "5A5A5A", 0x40, 12))
+    fill = int(bh * min(v, 100) / 100)
+    if fill > 0:
+        col = "8C8C8C" if muted else ("3D9BFF" if v > 100 else ACCENT)
+        L.append(_rect(bx, by + bh - fill, bw, fill, col, 0, 12))
+    L.append(_text(x + w // 2, y + 28, "Sessiz" if muted else str(v), 26 if muted else 40, "FFFFFF", True, an=8))
+    L.append(_text(x + w // 2, y + h - 64, "SES", 24, "A0A0A0", True, an=8))
+    return L
+
+
+def ui_volume():
+    """Volume changed while live TV is up: Android's own volume panel is hidden behind mpv, so draw one."""
+    _vol_ui["until"] = time.time() + 2.5; _vol_ui["shown"] = True
+    _overlay(_vol_ui["base"])
+
+
 def _overlay(lines):
+    _vol_ui["base"] = list(lines or [])
+    if time.time() < _vol_ui["until"]:
+        try:
+            lines = list(lines or []) + _vol_elems()
+        except Exception as e:
+            print("vol ui:", e, flush=True)
+    _overlay_raw(lines)
+
+
+def _overlay_raw(lines):
     """osd-overlay belongs to the IPC client that created it: mpv deletes it when that connection closes, so a
     connect-send-close call (mpv_ipc) shows nothing. Keep one persistent connection (reader thread discards
     mpv's replies/events so the socket never fills); reconnect when mpv was restarted."""
@@ -1176,14 +1219,14 @@ def ui_list_draw():
 def ui_list_open():
     i = _playing_idx()
     with _ui_lock:
-        _ui.update(mode="list", cur=i if i is not None else _ch["i"], until=time.time() + 12)
+        _ui.update(mode="list", cur=i if i is not None else _ch["i"], until=time.time() + 6)
     ui_list_draw()
 
 
 def ui_list_move(step):
     n = len(channels()) or 1
     with _ui_lock:
-        _ui.update(cur=(_ui["cur"] + step) % n, until=time.time() + 12)
+        _ui.update(cur=(_ui["cur"] + step) % n, until=time.time() + 6)
     ui_list_draw()
 
 
@@ -1192,6 +1235,10 @@ def _ui_timer():
         time.sleep(0.5)
         if _ui["mode"] and time.time() > _ui["until"]:
             ui_hide()
+        if _vol_ui["shown"] and time.time() > _vol_ui["until"]:
+            _vol_ui["shown"] = False
+            if _split["on"]:
+                _overlay(_vol_ui["base"])
 
 
 threading.Thread(target=_ui_timer, daemon=True).start()
@@ -1308,11 +1355,136 @@ def app_open(pkg):
     return android(f"am start -n {comp}", timeout=8) if comp else False
 
 
+# ---- Assistant bar: shows that the voice key is listening / thinking and what was understood.
+# Live TV (host mpv) -> mpv overlay; Android -> org.tvbox.asistan overlay (non-focusable, keeps the app's focus).
+ASSIST_RCV = "org.tvbox.asistan/.Bar"
+GDOTS = ("F48542", "3543EA", "05BCFB", "53A834")      # Google-ish blue, red, yellow, green (ASS = BGR)
+
+
+def _assist_ass(state, title, sub):
+    w = 1040; x = (1920 - w) // 2; y = 1080 - 60 - (150 if sub else 110)
+    h = 150 if sub else 110
+    L = [_rect(x, y, w, h, "1E1816", 0x08, 55)]
+    for k, c in enumerate(GDOTS):
+        cy = y + h // 2 + (-10 if state == "listen" and k % 2 == 0 else 0)
+        L.append(_rect(x + 46 + k * 30, cy - 9, 18, 18, "3543EA" if state == "err" else c, 0, 9))
+    tx = x + 190
+    L.append(_text(tx, y + (26 if sub else 30), _ass(title[:60]), 38, "FFFFFF", True))
+    if sub:
+        L.append(_text(tx + 2, y + 84, _ass(sub[:80]), 28, "C8CCD2"))
+    return L
+
+
+def assist(state, title, sub="", ms=None):
+    """state: listen | think | say | err | hide"""
+    try:
+        if _split["on"]:
+            if state == "hide":
+                if _ui["mode"] == "voice":
+                    ui_hide()
+                return
+            if _ui["mode"] == "choice":
+                return
+            with _ui_lock:
+                _ui.update(mode="voice", until=time.time() + (ms or (9 if state == "listen" else 20 if state == "think" else 4)))
+            _overlay(_assist_ass(state, title, sub))
+            return
+        import shlex
+        cmd = f"am broadcast -f 0x20 -n {ASSIST_RCV} --es state {state}"
+        if state != "hide":
+            cmd += f" --es text {shlex.quote(title[:120])}"
+            if sub:
+                cmd += f" --es sub {shlex.quote(sub[:160])}"
+            if ms:
+                cmd += f" --ei ms {int(ms * 1000)}"
+        android(cmd + " >/dev/null", timeout=4)
+    except Exception as e:
+        print("assist:", e, flush=True)
+
+
+def _human(what):
+    w = re.sub(r"\s*\[model [^\]]*\]|\s*\(\d+p\)", "", what)
+    for a, b in (("kanal ", "Kanal açılıyor: "), ("uygulama ", "Açılıyor: "), ("YouTube'da oynat: ", "YouTube'da oynatılıyor: "),
+                 ("YouTube'da ara: ", "YouTube'da aranıyor: "), ("yazdı: ", "Yazıldı: "), ("ses ", "Ses: ")):
+        if w.startswith(a):
+            return b + w[len(a):]
+    return w[:1].upper() + w[1:]
+
+
+def _fg_pkg():
+    out = adb_out("dumpsys window | grep -m1 mCurrentFocus", timeout=4)
+    m = re.search(r" ([A-Za-z0-9_.]+)/", out)
+    return m.group(1) if m else ""
+
+
+def web_open(q, search=False, youtube=False):
+    """Open something IN Firefox: a site name/domain, YouTube's website, or a web search."""
+    from urllib.parse import quote
+    k = q.lower().replace(" ", "")
+    if youtube:                                              # "YouTube'dan X aç" while Firefox is in front
+        url = "https://www.youtube.com/results?search_query=" + quote(q)
+    elif re.fullmatch(r"(youtube|yutup|yutub|youtub)\w*", k):
+        url = "https://www.youtube.com/"
+    elif re.fullmatch(r"[a-z0-9\-]+(\.[a-z0-9\-]+)+(/\S*)?", k):
+        url = "https://" + k
+    elif search:
+        url = "https://duckduckgo.com/?q=" + quote(q)
+    else:                                                    # "Radio Garden aç" -> first result (DuckDuckGo !ducky)
+        url = "https://duckduckgo.com/?q=" + quote("! " + q)
+    if _split["on"]:
+        split_off(to_single=False)
+    _focus["t"] = 0
+    return android(f"am start -a android.intent.action.VIEW -d '{url}' -n {BROWSER}", timeout=8), f"Firefox: {q}"
+
+
+def in_app(r):
+    """'<app>'dan <q> aç' — do it inside that app where the app allows it."""
+    app, q = r["app"], r["q"]
+    if app == "web":
+        return web_open(q, r.get("search"))
+    tpl = _nlu().APP_EXTRA.get(app, {}).get("search")
+    if tpl:                                                  # app with a search deep link
+        from urllib.parse import quote
+        return android(f"am start -a android.intent.action.VIEW -d '{tpl.format(q=quote(q))}' {r['pkg']}",
+                       timeout=8), f"{r['name']}'da ara: {q}"
+    if r.get("ch") is not None:                              # Beleş TiVi etc. can't be driven from outside:
+        hit = r["ch"]; chs = channels()                      # play the same channel in our own Kanallar
+        _want["left"] = hit; _ch["i"] = hit
+        ok = watch_single(("ch", hit)); osd_now()
+        return ok, f"kanal {chs[hit][0]} (Kanallar'da; {r['name']} dışarıdan kanal seçtirmiyor)"
+    return app_open(r["pkg"]), f"uygulama {r['name']}"
+
+
+def voice_typing(raw):
+    """A text field is focused (search box, address bar): dictate, except a few control words and explicit
+    '<app>'dan ...' commands."""
+    n = _norm(raw)
+    if n in ("ara", "arat", "tamam", "gönder", "git", "bul"):
+        return ime_confirm(), "aramayı başlattı"
+    if n in ("sil", "temizle", "hepsini sil", "yazıyı sil"):
+        return type_clear(), "yazıyı sildi"
+    if n in ("geri", "geri dön", "kapat", "vazgeç"):
+        return android("input keyevent 4"), "geri"
+    try:
+        r = _nlu().parse(raw, [c[0] for c in channels()])
+    except Exception:
+        r = {"act": None}
+    if r["act"] == "in_app" or (r["act"] in ("yt_play", "yt_search") and re.search(r"(youtube|yutup)\S*\s?(dan|den|tan|ten)\b", n)):
+        return None
+    text = re.sub(r"[\s.,!?…]+$", "", raw.strip())
+    return type_full(text, ""), f"yazdı: {text}"
+
+
 def voice_cmd(text, ip):
     raw = str(text).strip()[:200]
     n = _norm(raw)
     if not n:
         return False, "boş"
+    fg = "" if _split["on"] else _fg_pkg()
+    if not _split["on"] and field_focused():
+        res = voice_typing(raw)
+        if res is not None:
+            return res
     def vol(a, v=None, times=1):
         for _ in range(times):
             volume(a, v)
@@ -1352,6 +1524,12 @@ def voice_cmd(text, ip):
                          APPS_PKG_YT if (not _split["on"] and focus_app() == "YouTube") else None)
     except Exception as e:
         print("nlu:", e, flush=True); r = {"act": None}
+    if r["act"] == "in_app":
+        return in_app(r)
+    if fg == "org.mozilla.firefox" and r["act"] in ("app", "yt_play", "yt_search") and \
+            (r.get("pkg") == APPS_PKG_YT or r["act"] != "app"):        # inside Firefox: YouTube = the website
+        return web_open("youtube" if r["act"] == "app" else r["q"], search=r["act"] == "yt_search",
+                        youtube=r["act"] != "app")
     if r["act"] in ("yt_play", "yt_search"):
         return yt_go(r["q"], play=r["act"] == "yt_play")
     if r["act"] == "app":
@@ -1759,17 +1937,24 @@ class H(http.server.BaseHTTPRequestHandler):
             if not ipaddress.ip_address(ip).is_loopback:
                 return self.send(403)
             if parts == ["voice", "listen"]:
-                voice_feedback("● Dinliyorum…"); return self.send(200)
+                assist("listen", "Dinliyorum…", "Konuşun, bitince tuşu bırakın"); return self.send(200)
+            if parts == ["voice", "think"]:
+                assist("think", "Anlıyorum…"); return self.send(200)
             if parts == ["voice", "fail"]:
-                voice_feedback("Ses anlaşılamadı"); log_action(ip, "sesli komut: duyulmadı"); return self.send(200)
+                assist("err", "Sesi duyamadım", "Tuşa basılı tutup konuşun", ms=3)
+                log_action(ip, "sesli komut: duyulmadı"); return self.send(200)
             try:
                 n = int(self.headers.get("Content-Length", "0"))
                 text = str(json.loads(self.rfile.read(min(n, 4000)) or b"{}").get("text", ""))
                 ok, what = voice_cmd(text, ip)
             except Exception as e:
                 ok, what = False, f"hata {e}"
-            if not ok or what.startswith(("anlaşılmadı", "ses ")):
-                voice_feedback(("" if ok else "✗ ") + what)
+            if what.startswith("anlaşılmadı") or not ok:
+                assist("err", f"«{text.strip()[:60]}»", "Anlaşılmadı, tekrar deneyin" if what.startswith("anlaşılmadı") else "Yapılamadı: " + _human(what), ms=4)
+            elif what.startswith("emin değilim"):
+                pass                                          # the on-TV choice list is showing
+            else:
+                assist("say", f"«{text.strip()[:60]}»", _human(what), ms=3.5)
             log_action(ip, f"sesli: «{text[:80]}» → {what}" + ("" if ok else " (BAŞARISIZ)"))
             return self.send_json({"ok": bool(ok), "what": what})
         if parts == ["mouse"]:
@@ -1787,6 +1972,8 @@ class H(http.server.BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[0] == "vol" and parts[1] in ("up", "down", "mute", "normal", "set"):
             v = parse_qs(u.query).get("v", [None])[0]
             volume(parts[1], int(v) if v and v.isdigit() else None)
+            if _split["on"]:
+                ui_volume()
             st = vol_state(); log_action(ip, f"ses {parts[1]} → {st['vol']}%{' (sessiz)' if st['muted'] else ''}")
             return self.send_json(st)
         ok = False
