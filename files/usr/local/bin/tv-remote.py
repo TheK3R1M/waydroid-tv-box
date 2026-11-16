@@ -139,7 +139,9 @@ def _best_variant(url):
         import urllib.request, urllib.parse
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         try:
-            txt = urllib.request.urlopen(req, timeout=5).read(200000).decode("utf-8", "ignore")
+            # 9 s: the turknet CDN (ATV, A Spor) regularly needs 3-6 s to answer its long DVR playlist; 5 s made
+            # ATV fail to open about half the time ("ATV hep bozuk").
+            txt = urllib.request.urlopen(req, timeout=9).read(400000).decode("utf-8", "ignore")
         except Exception:
             return None
         if "#EXT-X-STREAM-INF" not in txt:
@@ -276,9 +278,34 @@ def ticket():
         return _gen[0]
 
 
+def _veil(src):
+    """Zapping: mpv keeps the old frame frozen while the next stream loads, which looks like a hang. Cover the
+    picture like a real TV does (dark screen + what is coming) until the first new frame arrives."""
+    try:
+        name = src_name(src) if src[0] != "ch" else re.sub(r"\s*\(\d+p\)", "", channels()[src[1] % len(channels())][0])
+        num = str(src[1] % len(channels()) + 1) if src[0] == "ch" else ""
+    except Exception:
+        name, num = "", ""
+    L = [_rect(0, 0, 1920, 1080, "000000", 0x00, 0),
+         _text(960, 470, num, 90, ACCENT, True, an=5), _text(960, 580, _ass(name), 56, "FFFFFF", True, an=5),
+         _text(960, 660, "açılıyor…", 30, "9A9A9A", an=5)]
+    with _ui_lock:
+        _ui.update(mode="veil", until=time.time() + 20)
+    _overlay(L)
+
+
 def mpv_start():
     """Load the current single/split sources into the persistent window."""
     my = _gen[0]
+    if _split["mode"] == "single" and mpv_alive() and _ui["mode"] in (None, "banner", "veil", "voice"):
+        _veil(_split["src"]["left"])
+    ok = _mpv_start(my)
+    if _ui["mode"] == "veil" and (not ok or _gen[0] == my):
+        ui_hide()                 # success: the caller draws the channel banner right after
+    return ok
+
+
+def _mpv_start(my):
     if _split["mode"] == "single":
         files = resolve(_split["src"]["left"])
         if not files:
@@ -1273,7 +1300,14 @@ def _norm(t):
     t = str(t).replace("I", "ı").replace("İ", "i").lower()
     t = re.sub(r"[^\wçğıöşü%' ]+", " ", t)
     t = re.sub(r"(\w)'(\w+)", r"\1 \2", t)            # "youtube'da" -> "youtube da"
-    t = " ".join(_NUMW.get(w, w) for w in t.split())
+    def num(w):                                         # "otuza", "elliye", "yirmi beşe" -> digits
+        if w in _NUMW:
+            return _NUMW[w]
+        for suf in ("ya", "ye", "yı", "yi", "a", "e", "ı", "i", "u", "ü"):
+            if w.endswith(suf) and w[: -len(suf)] in _NUMW and len(w) - len(suf) >= 2:
+                return _NUMW[w[: -len(suf)]]
+        return w
+    t = " ".join(num(w) for w in t.split())
     return re.sub(r"\b([1-9]0) ([1-9])\b", lambda m: str(int(m.group(1)) + int(m.group(2))), t)   # "yirmi beş" -> 25
 
 
@@ -1383,14 +1417,12 @@ def assist(state, title, sub="", ms=None):
                 if _ui["mode"] == "voice":
                     ui_hide()
                 return
-            if _ui["mode"] == "choice":
-                return
             with _ui_lock:
                 _ui.update(mode="voice", until=time.time() + (ms or (9 if state == "listen" else 20 if state == "think" else 4)))
             _overlay(_assist_ass(state, title, sub))
             return
         import shlex
-        cmd = f"am broadcast -f 0x20 -n {ASSIST_RCV} --es state {state}"
+        cmd = f"am broadcast -f 0x20 -n {ASSIST_RCV} --es state {'say' if state == 'ask' else state}"
         if state != "hide":
             cmd += f" --es text {shlex.quote(title[:120])}"
             if sub:
@@ -1455,155 +1487,104 @@ def in_app(r):
     return app_open(r["pkg"]), f"uygulama {r['name']}"
 
 
-def voice_typing(raw):
-    """A text field is focused (search box, address bar): dictate, except a few control words and explicit
-    '<app>'dan ...' commands."""
-    n = _norm(raw)
-    if n in ("ara", "arat", "tamam", "gönder", "git", "bul"):
-        return ime_confirm(), "aramayı başlattı"
-    if n in ("sil", "temizle", "hepsini sil", "yazıyı sil"):
-        return type_clear(), "yazıyı sildi"
-    if n in ("geri", "geri dön", "kapat", "vazgeç"):
-        return android("input keyevent 4"), "geri"
-    try:
-        r = _nlu().parse(raw, [c[0] for c in channels()])
-    except Exception:
-        r = {"act": None}
-    if r["act"] == "in_app" or (r["act"] in ("yt_play", "yt_search") and re.search(r"(youtube|yutup)\S*\s?(dan|den|tan|ten)\b", n)):
-        return None
-    text = re.sub(r"[\s.,!?…]+$", "", raw.strip())
-    return type_full(text, ""), f"yazdı: {text}"
+VOICE_FIELD_CTRL = {"ara": "submit", "arat": "submit", "tamam": "submit", "gönder": "submit", "git": "submit",
+                    "sil": "clear", "temizle": "clear", "hepsini sil": "clear", "yazıyı sil": "clear",
+                    "geri": "back", "geri dön": "back", "vazgeç": "back"}
 
 
 def voice_cmd(text, ip):
+    """Spoken sentence -> action, in three layers:
+    1. tv-nlu.py: Turkish grammar (case suffixes, '<app>'dan/üzerinde X aç|ara', 'X sitesine gir', '<engine>'da X
+       ara', '... çal/dinle', channel names). Structural rules, not a list of remembered sentences.
+    2. tv-intent.py: local model picks the most likely action for anything else; its probability decides
+       (act / ask on the TV with OK=yes / 'not understood').
+    3. A focused text field means dictation unless the sentence is an explicit '<app>'dan ...' command."""
     raw = str(text).strip()[:200]
     n = _norm(raw)
     if not n:
         return False, "boş"
-    fg = "" if _split["on"] else _fg_pkg()
-    if not _split["on"] and field_focused():
-        res = voice_typing(raw)
-        if res is not None:
-            return res
-    def vol(a, v=None, times=1):
-        for _ in range(times):
-            volume(a, v)
-        st = vol_state(); return True, f"ses {st['vol']}%" + (" (sessiz)" if st["muted"] else "")
-    if re.search(r"\bses", n):
-        d = re.search(r"\b(\d{1,3})\b", n)
-        if re.search(r"\b(kapat|kes|sustur)\b", n) or n in ("sessiz", "sessize al"):
-            pactl("set-sink-mute", SINK, "1"); return True, "ses kapatıldı"
-        if d:
-            return vol("set", int(d.group(1)))
-        if "normal" in n:
-            return vol("normal")
-        if re.search(r"\b(kıs|kız|azalt|düşür|alçalt)", n):     # recogniser often hears "kıs" as "kız"
-            pactl("set-sink-mute", SINK, "0"); return vol("down", times=2)
-        if re.search(r"\b(aç|yükselt|artır|arttır|yükseğe)", n):
-            pactl("set-sink-mute", SINK, "0"); return vol("up", times=2)
-    if n in ("sessiz", "sustur"):
-        pactl("set-sink-mute", SINK, "1"); return True, "ses kapatıldı"
-    if n in ("geri", "geri dön", "geri git"):
-        if _split["on"]:
-            return split_off(to_single=True), "geri"
-        return android("input keyevent 4"), "geri"
+    field = not _split["on"] and field_focused()
+    c = VOICE_FIELD_CTRL.get(n) if field else None
+    if c == "submit":
+        return ime_confirm(), "aramayı başlattı"
+    if c == "clear":
+        return type_clear(), "yazıyı sildi"
+    if n in ("geri", "geri dön", "geri git", "vazgeç"):
+        return (split_off(to_single=True) if _split["on"] else android("input keyevent 4")), "geri"
     if re.fullmatch(r"ana (ekran|sayfa|menü)(a|ya|ye|e)?( git| aç| dön)?", n):
         if _split["on"]:
             split_off(to_single=False)
         return android("input keyevent 3"), "ana ekran"
-    if re.fullmatch(r"(durdur|duraklat|devam( et)?|oynat|başlat)", n):
-        return android(f"input keyevent {KEYS['play']}"), "oynat/duraklat"
-    if re.fullmatch(r"(ekranı böl|bölünmüş ekran|ikili ekran|ekranı (ikiye|2 ?ye|2) böl|iki kanal(ı)? (birden|beraber|aynı anda) (izle|aç)\w*)( aç)?", n):
-        return split_on(), "bölünmüş ekran"
-    if re.fullmatch(r"tek ekran( yap| aç)?", n) and _split["on"]:
-        return split_off(to_single=True), "tek ekran"
-    if re.fullmatch(r"(kanallar|kanal listesi|canlı tv|canlı yayın|televizyon|tv)( aç| göster| listesi)?", n):
-        return tv_open(), "kanal listesi"
-    try:                                               # Turkish suffix-aware parser (tv-nlu.py)
-        r = _nlu().parse(raw, [c[0] for c in channels()],
-                         APPS_PKG_YT if (not _split["on"] and focus_app() == "YouTube") else None)
+    if not field and n in ("sessiz", "sessize al", "sustur", "sesi kapat", "sesi kes"):
+        pactl("set-sink-mute", SINK, "1"); return True, "ses kapatıldı"
+    m = re.search(r"\bses\w*\b.*?\b(\d{1,3})\b|\b(\d{1,3})\b.*\bses", n)
+    if m and not field:
+        pactl("set-sink-mute", SINK, "0"); volume("set", int(m.group(1) or m.group(2)))
+        return True, f"ses {vol_state()['vol']}%"
+    chs = channels()
+    try:
+        r = _nlu().parse(raw, [ch[0] for ch in chs],
+                         APPS_PKG_YT if (not _split["on"] and _fg_pkg() == APPS_PKG_YT) else None)
     except Exception as e:
         print("nlu:", e, flush=True); r = {"act": None}
+    explicit = r["act"] == "in_app" or (r["act"] in ("yt_play", "yt_search") and
+                                        re.search(r"(youtube|yutup)\S*\s?(dan|den|tan|ten|da|de|ta|te)\b", n))
+    if field and not explicit:
+        t = _clean_dictation(raw)
+        return type_full(t, ""), f"yazdı: {t}"
     if r["act"] == "in_app":
         return in_app(r)
-    if fg == "org.mozilla.firefox" and r["act"] in ("app", "yt_play", "yt_search") and \
-            (r.get("pkg") == APPS_PKG_YT or r["act"] != "app"):        # inside Firefox: YouTube = the website
-        return web_open("youtube" if r["act"] == "app" else r["q"], search=r["act"] == "yt_search",
-                        youtube=r["act"] != "app")
     if r["act"] in ("yt_play", "yt_search"):
         return yt_go(r["q"], play=r["act"] == "yt_play")
     if r["act"] == "app":
         return app_open(r["pkg"]), f"uygulama {r['name']}"
     if r["act"] == "channel":
-        chs = channels(); hit = r["i"]
-        sd = _split["side"] if _split["mode"] == "split" else "left"
-        _want[sd] = hit; _ch["i"] = hit
-        ok = split_set(("ch", hit), sd) if _split["on"] else watch_single(("ch", hit))
-        osd_now()
-        return ok, f"kanal {chs[hit][0]}"
-    for pat, app in ((r"(youtube|yutup|you tube|smart ?tv|smart ?tube)", "youtube"),
-                     (r"(firefox|tarayıcı|internet|web)", "web")):
-        if re.fullmatch(pat + r"( aç| uygulaması| uygulamasını aç|ı aç|u aç|yu aç|yi aç)?", n):
-            if _split["on"]:
-                split_off(to_single=False)
-            _focus["t"] = 0
-            return android(f"am start -n {APPS[app]}", timeout=8), f"uygulama {app}"
-    chs = channels()
-    step = None
-    if re.search(r"(sonraki|ileri|aşağı) kanal|kanal (ileri|aşağı|sonraki)", n):
-        step = 1
-    elif re.search(r"(önceki|yukarı) kanal|kanal (geri|yukarı|önceki)", n):
-        step = -1
-    if step and chs:
-        sd = _split["side"] if _split["mode"] == "split" else "left"
-        i = (base_idx(sd) + step) % len(chs)
-        _want[sd] = i; _ch["i"] = i
-        ok = split_set(("ch", i), sd) if _split["on"] else watch_single(("ch", i))
-        osd_now()
-        return ok, f"kanal {chs[i][0]}"
-    m = re.fullmatch(r"(?:youtube|yutup|you tube)(?: da| de| dan| den| ta| te)?\s+(.+?)(?:\s+(?:ara|arat|bul|aç))?", n)
-    if m:
-        q = m.group(1)
-        from urllib.parse import quote
-        if _split["on"]:
-            split_off(to_single=False)
-        url = "https://www.youtube.com/results?search_query=" + quote(q)
-        return android(f"am start -a android.intent.action.VIEW -d '{url}' org.smarttube.stable", timeout=8), f"YouTube'da ara: {q}"
-    # channel by name ("trt 1 aç", "show tv", "kanal d'yi aç")
-    if chs:
-        has_verb = bool(re.search(_VERB, n))
-        cand = re.sub(_VERB, "", n)
-        cand = re.sub(r"\b(yi|yı|yu|yü|i|ı|u|ü)$", "", cand).strip()
-        key = cand.replace(" ", "")
-        hit = None
-        if key:
-            for i, (name, _u) in enumerate(chs):
-                if _chkey(name) == key:
-                    hit = i; break
-            if hit is None and len(key) >= 3:         # "kanaldyeiyi" -> Kanal D; "star" -> Star TV (longest wins)
-                best = 0
-                for i, (name, _u) in enumerate(chs):
-                    k = _chkey(name)
-                    if (k.startswith(key) or (key.startswith(k) and len(k) >= 3)) and len(k) > best:
-                        hit, best = i, len(k)
-        if hit is not None and (has_verb or _split["on"] or not field_focused()):
-            sd = _split["side"] if _split["mode"] == "split" else "left"
-            _want[sd] = hit; _ch["i"] = hit
-            ok = split_set(("ch", hit), sd) if _split["on"] else watch_single(("ch", hit))
-            osd_now()
-            return ok, f"kanal {chs[hit][0]}"
-    if not _split["on"] and field_focused():
-        return type_full(raw, ""), f"yazdı: {raw}"
-    return voice_model(raw, n, chs)
+        return _zap(r["i"])
+    if re.fullmatch(r"(kanallar|kanal listesi|canlı tv|canlı yayın|televizyon|tv)( aç| göster| listesi)?", n):
+        return tv_open(), "kanal listesi"
+    return voice_model(raw)
 
 
-# ---- Calibrated intent selection (local LLM on this box, tv-llm.service = llama-server on 127.0.0.1:8179).
-# Rules above catch the common phrasings exactly; anything else goes to the model, which picks one action
-# letter. Its probability decides: >= ACT_P act; >= ASK_P show the top choices on the TV (pick with the remote);
-# lower -> "anlaşılmadı". Never acts on a guess silently.
-ACT_P, ASK_P = 0.85, 0.45
+LETTER_TO_DECISION = {"channel": ("kanal_ac", ""), "ch_next": ("kanal_sonraki", ""), "ch_prev": ("kanal_onceki", ""),
+                      "ch_list": ("kanal_listesi", ""), "vol_up": ("ses_ac", ""), "vol_down": ("ses_kis", ""),
+                      "mute": ("ses_kapat", ""), "yt_search": ("video_oynat", ""), "yt_open": ("uygulama_ac", "YouTube"),
+                      "web": ("uygulama_ac", "Firefox"), "back": ("geri", ""), "home": ("ana_ekran", ""),
+                      "play": ("duraklat", ""), "split": ("ekrani_bol", "")}
+
+
+def _letter_decision(kind, raw):
+    e, app = LETTER_TO_DECISION[kind]
+    h = raw
+    if e == "video_oynat":
+        mm = _nlu()
+        toks = mm.norm(raw).split()
+        h = mm._clean_query([t for t in toks if not mm.stem(t, mm.YOUTUBE)]) or raw
+    if app == "Firefox":
+        app = next((k for k, v in apps_cached().items() if v == "org.mozilla.firefox"), "Firefox")
+    return {"eylem": e, "uygulama": app or "yok", "hedef": h}
+
+
+def voice_model(raw):
+    try:
+        ranked, mass = _intent_mod().classify(raw, [ch[0] for ch in channels()], timeout=10)
+    except Exception as e:
+        print("intent:", e, flush=True)
+        return False, f"anlaşılmadı: {raw}"
+    if not ranked or ranked[0][0] == "none":
+        return False, f"anlaşılmadı: {raw}" + (f" [none %{int(ranked[0][1] * 100)}]" if ranked else "")
+    top, p = ranked[0]
+    d = _letter_decision(top, raw)
+    tag = f" [model {top} %{int(p * 100)}]"
+    if p >= ACT_P:
+        ok, what = run_decision(d, raw)
+        return ok, what + tag
+    if p >= ASK_P:
+        confirm_ask(d, raw)
+        return True, "emin değilim, soruldu: " + describe(d) + tag
+    return False, f"anlaşılmadı: {raw}" + tag
+
+
 _intent = {"mod": None}
-_choice = {"items": [], "cur": 0, "text": ""}
 
 
 def _intent_mod():
@@ -1615,138 +1596,184 @@ def _intent_mod():
     return _intent["mod"]
 
 
-INTENT_LABEL = {"channel": "Kanal aç", "ch_next": "Sonraki kanal", "ch_prev": "Önceki kanal",
-                "ch_list": "Kanal listesi", "vol_up": "Sesi aç", "vol_down": "Sesi kıs", "mute": "Sesi kapat",
-                "yt_search": "YouTube'da ara", "yt_open": "YouTube'u aç", "web": "Tarayıcıyı aç", "back": "Geri",
-                "home": "Ana ekran", "play": "Duraklat / devam", "split": "Ekranı böl"}
+# ---- Understanding (local LLM, tv-llm.service = llama-server on 127.0.0.1:8179, tv-understand.py)
+ACT_P, ASK_P = 0.85, 0.45
+_und = {"mod": None, "mt": 0}
 
 
-def _find_channel(n, chs):
-    words = n.replace("'", " ").split()
-    best, bl = None, 0
-    for i, (name, _u) in enumerate(chs):
-        k = _chkey(name)
-        for a in range(len(words)):
-            for b in range(a + 1, min(len(words), a + 4) + 1):
-                cand = "".join(words[a:b])
-                for suf in ("", "ye", "ya", "yi", "yı", "e", "a", "i", "ı", "u", "ü", "yu", "yü"):
-                    if suf and cand.endswith(suf) and cand[: -len(suf)] == k or cand == k:
-                        if len(k) > bl:
-                            best, bl = i, len(k)
-    return best
+def _und_mod():
+    f = "/usr/local/bin/tv-understand.py"
+    mt = os.path.getmtime(f)
+    if _und["mod"] is None or mt != _und["mt"]:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tv_understand", f)
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        _und.update(mod=m, mt=mt)
+    return _und["mod"]
 
 
-def intent_run(kind, raw, n, chs):
+def app_table():
+    """Display name -> package for every installed app the assistant may open (names from tv-nlu + config)."""
+    t = {"Kanallar": TILE_PKG}
+    try:
+        for _k, (pkg, _f, name) in _nlu().APPS.items():
+            t[name] = pkg
+    except Exception:
+        pass
+    inst = set(re.findall(r"package:(\S+)", adb_out("pm list packages", timeout=6)))
+    return {k: v for k, v in t.items() if v in inst or v == TILE_PKG} or t
+
+
+_apps_cache = {"t": 0, "v": {}}
+
+
+def apps_cached():
+    if time.time() - _apps_cache["t"] > 600 or not _apps_cache["v"]:
+        _apps_cache.update(t=time.time(), v=app_table())
+    return _apps_cache["v"]
+
+
+def screen_name():
+    if _split["on"]:
+        return "Canlı TV"
+    pkg = _fg_pkg()
+    for name, p in apps_cached().items():
+        if p == pkg:
+            return name
+    return APP_NAMES.get(pkg, "Ana ekran" if not pkg else pkg.split(".")[-1])
+
+
+def understand(raw, field):
+    apps = apps_cached()
+    return _und_mod().understand(raw, {"screen": screen_name(), "field": field}, list(apps),
+                                 [re.sub(r"\s*\(\d+p\)", "", c[0]) for c in channels()], timeout=25)
+
+
+def _clean_dictation(t):
+    return re.sub(r"[\s.,!?…]+$", "", t.strip())
+
+
+def describe(d):
+    e, a, h = d.get("eylem"), d.get("uygulama", "yok"), d.get("hedef", "")
+    return {"uygulama_ac": f"{a} uygulamasını aç", "site_ac": f"Tarayıcıda '{h}' sitesini aç",
+            "web_ara": f"İnternette '{h}' ara", "uygulamada_ara": f"{a} içinde '{h}' ara",
+            "video_oynat": f"YouTube'da '{h}' oynat", "kanal_ac": f"'{h}' kanalını aç", "kanal_sonraki": "Sonraki kanal",
+            "kanal_onceki": "Önceki kanal", "kanal_listesi": "Kanal listesi", "ses_ac": "Sesi aç", "ses_kis": "Sesi kıs",
+            "ses_kapat": "Sesi kapat", "ses_ayarla": f"Sesi %{h} yap", "yaz": f"'{h}' yaz", "geri": "Geri",
+            "ana_ekran": "Ana ekran", "duraklat": "Duraklat / devam", "ekrani_bol": "Ekranı böl"}.get(e, e)
+
+
+def _zap(i):
     sd = _side() if _split["on"] else "left"
-    if kind == "channel":
-        i = _find_channel(n, chs)
-        if i is None:
-            return tv_open(), "kanal listesi (kanal adı bulunamadı)"
-        _want[sd] = i; _ch["i"] = i
-        ok = split_set(("ch", i), sd) if _split["on"] else watch_single(("ch", i)); osd_now()
-        return ok, f"kanal {chs[i][0]}"
-    if kind in ("ch_next", "ch_prev") and chs:
-        i = (base_idx(sd) + (1 if kind == "ch_next" else -1)) % len(chs)
-        _want[sd] = i; _ch["i"] = i
-        ok = split_set(("ch", i), sd) if _split["on"] else watch_single(("ch", i)); osd_now()
-        return ok, f"kanal {chs[i][0]}"
-    if kind == "ch_list":
+    chs = channels(); i %= len(chs)
+    _want[sd] = i; _ch["i"] = i
+    ok = split_set(("ch", i), sd) if _split["on"] else watch_single(("ch", i)); osd_now()
+    return ok, f"kanal {chs[i][0]}"
+
+
+def run_decision(d, raw):
+    e, app, h = d.get("eylem"), d.get("uygulama") or "yok", (d.get("hedef") or "").strip()
+    apps = apps_cached()
+    if e == "yaz":
+        txt = h if h and h.lower() in raw.lower() else _clean_dictation(raw)
+        return type_full(txt, ""), f"yazdı: {txt}"
+    if e == "uygulama_ac":
+        if app == "Kanallar":
+            return tv_open(), "kanal listesi"
+        if app in apps:
+            return app_open(apps[app]), f"uygulama {app}"
+        return False, f"'{app}' yüklü değil"
+    if e == "site_ac":
+        return web_open(h or raw)
+    if e == "web_ara":
+        return web_open(h or raw, search=True)
+    if e == "uygulamada_ara":
+        if apps.get(app) == APPS_PKG_YT:
+            return yt_go(h or raw, play=False)
+        key = next((k for k, v in _nlu().APPS.items() if v[2] == app), None)
+        tpl = _nlu().APP_EXTRA.get(key, {}).get("search") if key else None
+        if tpl:
+            from urllib.parse import quote
+            return android(f"am start -a android.intent.action.VIEW -d '{tpl.format(q=quote(h))}' {apps[app]}",
+                           timeout=8), f"{app}'da ara: {h}"
+        if apps.get(app) == "org.mozilla.firefox" or app == "yok":
+            return web_open(h or raw, search=True)
+        return app_open(apps[app]), f"uygulama {app} (içinde arama yapılamıyor)"
+    if e == "video_oynat":
+        return yt_go(h or raw, play=True)
+    if e == "kanal_ac":
+        chs = channels()
+        i = _nlu().find_channel(_nlu().norm(h or raw).split(), [c[0] for c in chs])
+        return _zap(i) if i is not None else (tv_open(), f"kanal listesi ('{h}' bulunamadı)")
+    if e in ("kanal_sonraki", "kanal_onceki"):
+        sd = _side() if _split["on"] else "left"
+        return _zap(base_idx(sd) + (1 if e == "kanal_sonraki" else -1))
+    if e == "kanal_listesi":
         return tv_open(), "kanal listesi"
-    if kind in ("vol_up", "vol_down"):
+    if e in ("ses_ac", "ses_kis"):
         pactl("set-sink-mute", SINK, "0")
         for _ in range(2):
-            volume("up" if kind == "vol_up" else "down")
+            volume("up" if e == "ses_ac" else "down")
         return True, f"ses {vol_state()['vol']}%"
-    if kind == "mute":
+    if e == "ses_kapat":
         pactl("set-sink-mute", SINK, "1"); return True, "ses kapatıldı"
-    if kind == "yt_search":
-        m = _nlu()
-        toks = m.norm(raw).split()
-        q = m._clean_query([t for t in toks if not m.stem(t, m.YOUTUBE)]) or raw
-        return yt_go(q, play=not any(t in m.SEARCH_VERBS for t in toks))
-    if kind in ("yt_open", "web"):
-        if _split["on"]:
-            split_off(to_single=False)
-        _focus["t"] = 0
-        return android(f"am start -n {APPS['youtube' if kind == 'yt_open' else 'web']}", timeout=8), INTENT_LABEL[kind]
-    if kind == "back":
+    if e == "ses_ayarla":
+        m = re.search(r"\d{1,3}", _norm(h) + " " + _norm(raw))
+        if m:
+            pactl("set-sink-mute", SINK, "0"); volume("set", int(m.group(0)))
+            return True, f"ses {vol_state()['vol']}%"
+        return False, "ses seviyesi anlaşılmadı"
+    if e == "geri":
         return (split_off(to_single=True) if _split["on"] else android("input keyevent 4")), "geri"
-    if kind == "home":
+    if e == "ana_ekran":
         if _split["on"]:
             split_off(to_single=False)
         return android("input keyevent 3"), "ana ekran"
-    if kind == "play":
+    if e == "duraklat":
         return android(f"input keyevent {KEYS['play']}"), "oynat/duraklat"
-    if kind == "split":
+    if e == "ekrani_bol":
         return split_on(), "bölünmüş ekran"
     return False, f"anlaşılmadı: {raw}"
 
 
-def _intent_warm():
-    """Fill llama-server's prompt cache with exactly the prompt tv-remote uses (else the first phrase after a
-    restart or a channel-list change re-reads ~1000 prompt tokens: 20+ s on this CPU)."""
-    time.sleep(15)
-    while True:          # every 5 min: a cache hit costs ~1 s CPU, a miss (tv-llm restarted, list changed) refills it
+# ---- Confirmation ("Bunu mu demek istediniz?"): while it is open the physical remote is GRABBED by the bridge
+# (keys reach only us, not Android/mpv): OK = do it, anything else = cancel. Phone remote: OK/Back the same.
+_confirm = {"d": None, "raw": "", "until": 0.0}
+
+
+def confirm_ask(d, raw):
+    _confirm.update(d=d, raw=raw, until=time.time() + 8)
+    assist("ask", "Bunu mu demek istediniz?", describe(d) + "   ·   OK = evet, Geri = hayır", ms=8)
+
+
+def confirm_key(key):
+    """Returns (handled, log text)."""
+    if not _confirm["d"] or time.time() > _confirm["until"]:
+        _confirm["d"] = None
+        return False, None
+    d, raw = _confirm["d"], _confirm["raw"]
+    _confirm["d"] = None
+    if key in ("ok", "play"):
+        assist("think", "Yapılıyor…", describe(d), ms=3)
+        ok, what = run_decision(d, raw)
+        assist("say" if ok else "err", f"«{raw[:60]}»", _human(what), ms=3)
+        return True, "sesli onay: " + what
+    assist("hide", "")
+    return True, "sesli onay: iptal"
+
+
+def _und_warm():
+    """Keep llama-server's prompt cache filled with the exact prompt (a miss costs ~20 s on this CPU)."""
+    time.sleep(20)
+    while True:
         try:
-            _intent_mod().classify("ısınma", [c[0] for c in channels()], timeout=300)
+            _intent_mod().classify("ısınma", [ch[0] for ch in channels()], timeout=300)
         except Exception as e:
-            print("intent warm:", e, flush=True)
+            print("understand warm:", e, flush=True)
         time.sleep(300)
 
 
-threading.Thread(target=_intent_warm, daemon=True).start()
-
-
-def voice_model(raw, n, chs):
-    try:
-        ranked, mass = _intent_mod().classify(raw, [c[0] for c in chs], timeout=8)
-    except Exception as e:
-        print("intent:", e, flush=True)
-        return False, f"anlaşılmadı: {raw}"
-    ranked = [(k, p) for k, p in ranked if k != "none" or p >= 0.5]
-    if not ranked or ranked[0][0] == "none":
-        return False, f"anlaşılmadı: {raw}"
-    top, p = ranked[0]
-    tag = f" [model {top} %{int(p * 100)}]"
-    if p >= ACT_P:
-        ok, what = intent_run(top, raw, n, chs)
-        return ok, what + tag
-    if p >= ASK_P and _split["on"]:
-        items = [k for k, q in ranked[:3] if k != "none" and q >= 0.05]
-        _choice.update(items=items, cur=0, text=raw, n=n)
-        ui_choice_draw()
-        return True, "emin değilim, seçenek gösterildi:" + ",".join(items) + tag
-    return False, f"anlaşılmadı: {raw}" + tag
-
-
-def ui_choice_draw():
-    it = _choice["items"]
-    L = [_rect(60, 60, 900, 150 + 74 * (len(it) + 1), PANEL, 0x1C, 24), _rect(60, 60, 12, 150 + 74 * (len(it) + 1), ACCENT, 0, 6),
-         _text(100, 84, "Bunu mu demek istediniz?", 40, "FFFFFF", True),
-         _text(102, 140, "«" + _ass(_choice["text"][:50]) + "»", 28, "B4B4B4")]
-    for k, kind in enumerate(it + ["cancel"]):
-        y = 200 + 74 * k; sel = k == _choice["cur"]
-        if sel:
-            L.append(_rect(84, y - 8, 850, 62, ACCENT, 0, 14))
-        L.append(_text(112, y, "Hiçbiri" if kind == "cancel" else INTENT_LABEL.get(kind, kind), 36, "FFFFFF", sel))
-    with _ui_lock:
-        _ui.update(mode="choice", until=time.time() + 10)
-    _overlay(L)
-
-
-def ui_choice_key(key):
-    it = _choice["items"] + ["cancel"]
-    if key in ("up", "down"):
-        _choice["cur"] = (_choice["cur"] + (-1 if key == "up" else 1)) % len(it)
-        ui_choice_draw(); return True, None
-    if key in ("ok", "play"):
-        kind = it[_choice["cur"]]
-        ui_hide()
-        if kind == "cancel":
-            return True, "seçim: hiçbiri"
-        ok, what = intent_run(kind, _choice["text"], _choice.get("n", ""), channels())
-        return ok, "seçim: " + what
-    ui_hide(); return True, "seçim kapandı"
+threading.Thread(target=_und_warm, daemon=True).start()
 
 
 # ---- "Kanallar" tile on the Android home screen (org.tvbox.kanallar, a code-less APK): Android stays isolated
@@ -1791,7 +1818,8 @@ _BRIDGE_KEYS = {"KEY_UP": "/key/up", "KEY_DOWN": "/key/down", "KEY_LEFT": "/key/
                 "KEY_PAGEUP": "/ch/prev", "KEY_PAGEDOWN": "/ch/next",          # same direction as the list on screen
                 "KEY_CHANNELUP": "/ch/prev", "KEY_CHANNELDOWN": "/ch/next",
                 "KEY_VOLUMEUP": "/vol/up", "KEY_VOLUMEDOWN": "/vol/down", "KEY_MUTE": "/vol/mute"}
-_REPEAT_OK = {"/vol/up", "/vol/down"}       # held volume repeats; held channel keys step every 0.35 s
+_REPEAT_OK = {"/vol/up", "/vol/down"}       # held volume repeats freely
+_REPEAT_STEP = {"/key/up", "/key/down", "/key/left", "/key/right", "/ch/next", "/ch/prev"}   # held: 1 step / 0.35 s
 
 
 def _bridge_post(path):
@@ -1804,6 +1832,9 @@ def _bridge_post(path):
         print("bridge:", e, flush=True)
 
 
+_CH_ONLY = set()
+
+
 def _remote_bridge():
     try:
         import evdev, select
@@ -1812,7 +1843,9 @@ def _remote_bridge():
         print("bridge off (no evdev):", e, flush=True)
         return
     codes = {getattr(ecodes, k): v for k, v in _BRIDGE_KEYS.items() if hasattr(ecodes, k)}
-    devs, last_scan, last_sent = {}, 0, {}
+    global _CH_ONLY
+    _CH_ONLY = {getattr(ecodes, k) for k in ("KEY_CHANNELUP", "KEY_CHANNELDOWN") if hasattr(ecodes, k)}
+    devs, last_scan, last_sent, grabbed = {}, 0, {}, False
     pool = ThreadPoolExecutor(max_workers=1)     # keeps key order, never blocks reading
     while True:
         if time.time() - last_scan > 5:          # hot-plug: dongle re-plugged / new event numbers
@@ -1830,8 +1863,16 @@ def _remote_bridge():
                     d.close()
         if not devs:
             time.sleep(5); continue
+        want = bool(_confirm["d"]) and time.time() < _confirm["until"]
+        if want != grabbed:                      # confirmation open: keys go only to us (not Android / mpv)
+            for d in list(devs.values()):
+                try:
+                    d.grab() if want else d.ungrab()
+                except Exception:
+                    pass
+            grabbed = want
         try:
-            r, _, _ = select.select(list(devs.values()), [], [], 5)
+            r, _, _ = select.select(list(devs.values()), [], [], 0.3 if grabbed else 1.0)
         except Exception:
             r = []
         for d in r:
@@ -1843,12 +1884,20 @@ def _remote_bridge():
                 if ev.type != ecodes.EV_KEY or ev.value not in (1, 2) or ev.code not in codes:
                     continue
                 path = codes[ev.code]
+                if grabbed:
+                    if ev.value == 1:
+                        pool.submit(_bridge_post, "/key/ok" if path == "/key/ok" else "/key/back")
+                    continue
                 if not _split["on"]:
-                    if path in ("/ch/next", "/ch/prev") and ev.value == 1:
-                        pool.submit(_bridge_post, "/tv/open")   # CH key in Android = open live TV + list
-                    continue                        # everything else: Android has focus and handles it
+                    # Android has focus and handles every key itself. PageUp/PageDown scroll pages there
+                    # (Kerim: they must not jump to live TV); only dedicated CH keys open the channel list.
+                    if ev.code in _CH_ONLY and ev.value == 1:
+                        pool.submit(_bridge_post, "/tv/open")
+                    continue
                 now = time.time()
-                if ev.value == 2 and path not in _REPEAT_OK and now - last_sent.get(path, 0) < 0.35:
+                if ev.value == 2 and path not in _REPEAT_OK and path not in _REPEAT_STEP:
+                    continue                        # held OK / Back / Home = one press, never a stream
+                if ev.value == 2 and path in _REPEAT_STEP and now - last_sent.get(path, 0) < 0.35:
                     continue
                 last_sent[path] = now
                 pool.submit(_bridge_post, path)
@@ -1977,10 +2026,13 @@ class H(http.server.BaseHTTPRequestHandler):
             st = vol_state(); log_action(ip, f"ses {parts[1]} → {st['vol']}%{' (sessiz)' if st['muted'] else ''}")
             return self.send_json(st)
         ok = False
-        if len(parts) == 2 and parts[0] == "key" and _split["on"] and _ui["mode"] == "choice":
-            ok, what = ui_choice_key(parts[1])
-            if what:
-                log_action(ip, "sesli " + what)
+        handled = False
+        if len(parts) == 2 and parts[0] == "key" and _confirm["d"]:
+            handled, what = confirm_key(parts[1])
+            if handled:
+                ok = True; log_action(ip, what)
+        if handled:
+            pass
         elif len(parts) == 2 and parts[0] == "key" and _split["on"] and parts[1] == "back" and _ui["mode"] == "list":
             ui_hide(); ok = True
             log_action(ip, "kanal listesi kapandı")

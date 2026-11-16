@@ -155,3 +155,26 @@ the app configured with `addon_scheme`, which opens its own install page.
 **Recogniser model check with real household clips** (20 clips kept in RAM, see 17.7): a Turkish fine-tune of
 whisper-small was *not* better than stock small with the natural prompt (spelled names phonetically:
 "Atevi", "Firefoks", "Yutup"); most real failures were parsing/context, fixed above.
+
+## 17.9 How the voice key decides (2026-11-16) ✅ offline harness 27/27
+
+Three layers, in order:
+1. **Structural Turkish parser** (`tv-nlu.py`) — grammar, not a list of remembered sentences: case suffixes
+   (`YouTube'dan`, `Kanal D'ye`), source phrases (`<app>'dan / 'da / üzerinde / içinde X aç|ara`),
+   `X sitesini aç / sitesine gir` (site), `<google|internet|yandex>'da X ara` (web search), `… çal / dinle`
+   (play on YouTube), channel names, app names. `aç / gir / git` = go straight there (sites via DuckDuckGo's
+   `!` first-result redirect, so any site name works without a list); `ara` = show results.
+2. **Model fallback** (`tv-intent.py`, Qwen3-1.7B on the box) for everything the parser doesn't cover: it
+   picks one action letter; its probability decides — ≥ 85 % act, 45–85 % ask on the TV
+   ("Bunu mu demek istediniz? OK = evet, Geri = hayır"; the physical remote is *grabbed* while the question is
+   open so OK doesn't also click in Android), lower = "anlaşılmadı".
+3. **Dictation first** when a text field is focused (except `ara/tamam`, `sil`, `geri` and explicit
+   `<app>'dan …` commands).
+
+Tap-style remotes (press+release arrive together) now record until ~0.8 s of silence (energy VAD) or a second
+key press, instead of a fixed 5 s window; presses while a command is running are ignored.
+
+**Measured limit of the on-box model.** A free-form "understanding" variant (the model writes
+`action | app | target` under a grammar) was tested on 38 held-out sentences: JSON output 25/38 at ~12 s per
+sentence, compact outputs were worse (5–11/38). The 4-core embedded CPU (shared with video decoding) is the
+bottleneck; a larger model needs a GPU (e.g. a PC running LM Studio/llama.cpp) — optional, not part of the kit.

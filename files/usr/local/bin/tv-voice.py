@@ -136,9 +136,39 @@ class Rec:
         return b"".join(self.buf)
 
 
+def endpoint(rec, stop):
+    """Tap mode: stop ~0.7 s after the speech ends (energy VAD on 100 ms frames), or on a second key press,
+    or after MAX_SEC; give up after 4 s without speech. A fixed 5 s window made every command wait 5 s and
+    fed trailing room noise to the recogniser."""
+    t0 = time.time(); seen = False; quiet = 0; loud = 0; floor = None; done = 0
+    while not stop.wait(0.1):
+        pcm = b"".join(rec.buf)
+        n = len(pcm) // 3200                       # 100 ms frames at 16 kHz s16
+        while done < n:
+            a = array.array("h"); a.frombytes(pcm[done * 3200:(done + 1) * 3200])
+            rms = (sum(x * x for x in a) / max(1, len(a))) ** 0.5
+            done += 1
+            if done <= 2:                          # key click lands in the first ~200 ms
+                continue
+            if done <= 6:
+                floor = rms if floor is None else min(floor, rms)
+            thr = max(250.0, (floor or 0) * 3.0)
+            if rms > thr:
+                loud += 1; quiet = 0
+                if loud >= 2:
+                    seen = True
+            else:
+                loud = 0
+                if seen:
+                    quiet += 1
+        el = time.time() - t0
+        if (seen and quiet >= 8 and el > 1.5) or el > MAX_SEC or (not seen and el > 4.0):
+            return
+
+
 def main():
     rec, devs, last_scan = Rec(), {}, 0
-    state = {"down": None}
+    state = {"down": None, "tap": None, "last": 0}
     work = threading.Lock()
 
     def finish(pcm):
@@ -188,15 +218,24 @@ def main():
             for ev in evs:
                 if ev.type != ecodes.EV_KEY or ev.code not in VOICE_KEYS:
                     continue
-                if ev.value == 1 and not state["down"] and not work.locked():
+                if ev.value != 1 and ev.value != 0:
+                    continue
+                if ev.value == 1 and state.get("tap"):          # second press while listening = "done"
+                    state["tap"].set(); continue
+                if ev.value == 1 and (work.locked() or time.time() - state.get("last", 0) < 0.8):
+                    continue                                   # busy / bounce: ignore (no queue of stale requests)
+                if ev.value == 1 and not state["down"]:
                     if rec.start():
                         state["down"] = time.time(); post("/voice/listen")
                 elif ev.value == 0 and state["down"]:
                     held = time.time() - state["down"]
-                    state["down"] = None
-                    if held < TAP_SEC:            # remote sends press+release at once: record a fixed window
-                        def tap():
-                            time.sleep(TAP_WINDOW); finish(rec.stop())
+                    state["down"] = None; state["last"] = time.time()
+                    if held < TAP_SEC:            # this remote sends press+release at once: listen until silence
+                        stop = threading.Event(); state["tap"] = stop
+                        def tap(stop=stop):
+                            endpoint(rec, stop)
+                            state["tap"] = None
+                            finish(rec.stop())
                         threading.Thread(target=tap, daemon=True).start()
                     else:
                         threading.Thread(target=finish, args=(rec.stop(),), daemon=True).start()

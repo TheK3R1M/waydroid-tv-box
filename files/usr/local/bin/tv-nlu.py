@@ -17,9 +17,12 @@ import difflib, re
 SUFFIXES = sorted("da de ta te dan den tan ten an en ı i u ü yı yi yu yü ya ye a e yla yle la le nın nin nun nün "
                   "ın in un ün yı yi ndan nden na ne nı ni nu nü nda nde".split(), key=len, reverse=True)
 PLAY_VERBS = {"aç", "açar", "açarmısın", "açsana", "açın", "izle", "izleyelim", "izlet", "izlemek", "oynat", "oynatır",
+              "gir", "git", "girer", "dinlet", "çalar", "çalsana",
               "koy", "koyar", "başlat", "dinle", "dinleyelim", "çal", "çalar", "göster", "getir"}
 SEARCH_VERBS = {"ara", "arat", "arar", "bul", "bulur", "listele", "aratır"}
 FILLER = {"lütfen", "mısın", "misin", "musun", "bana", "şu", "şunu", "biraz", "hadi", "bakalım", "tamam",
+          "uygulama", "uygulamalar", "uygulamalardan", "uygulamayı", "uygulamasını", "uygulaması", "uygulamasından",
+          "uygulamasında", "üzerinde", "üzerinden", "içinde", "içinden", "ile", "sitesi", "sitesini", "sitesine",
           "aç", "acaba", "istiyorum", "ister", "yap", "da", "de", "dan", "den", "ta", "te", "tan", "ten"}
 VIDEO_WORDS = re.compile(r"^(video|videosu|videosunu|videoyu|videoları|videolarını|videolar|klip|klibi|klibini)$")
 
@@ -142,6 +145,10 @@ def find_channel(tokens, channel_names, fuzzy=True):
     return best
 
 
+WEB_ENGINES = {"google", "gugıl", "yandex", "bing", "internet", "web", "duckduckgo"}
+MUSIC_VERBS = {"çal", "çalar", "çalsana", "dinle", "dinlet", "dinleyelim"}
+SRC_WORDS = {"üzerinde", "üzerinden", "içinde", "içinden", "ile", "uygulamasında", "uygulamasından", "üstünde",
+             "uygulamasıyla", "tarayıcısında", "tarayıcısından"}      # "Firefox üzerinde X ara"
 SRC_SUFFIX = ("dan", "den", "tan", "ten", "da", "de", "ta", "te", "an", "en", "ndan", "nden", "nda", "nde")
 
 
@@ -155,7 +162,7 @@ def _source_app(tokens):
                 continue
             nxt = tokens[i + 1]
             glued = t.lstrip("'") != base and t.lstrip("'")[len(base):] in SRC_SUFFIX
-            split_suffix = nxt.startswith("'") and nxt[1:] in SRC_SUFFIX or nxt in SRC_SUFFIX
+            split_suffix = nxt.startswith("'") and nxt[1:] in SRC_SUFFIX or nxt in SRC_SUFFIX or nxt in SRC_WORDS
             if glued or split_suffix:
                 rest = tokens[i + (2 if split_suffix else 1):]
                 return key, rest
@@ -190,6 +197,22 @@ def parse(text, channel_names=(), current_app=None):
         q = _clean_query(tokens)
         if q:
             return {"act": "yt_search" if has_search and not has_play else "yt_play", "q": q}
+    # generic web phrases (no app named): "<engine>'da X ara", "X sitesini aç / sitesine gir"
+    eng = next((k for k, t in enumerate(tokens) if stem(t, WEB_ENGINES)), None)
+    if eng is not None and has_search:
+        q = _clean_query(tokens[:eng] + tokens[eng + 1:])
+        if q:
+            return {"act": "in_app", "app": "web", "pkg": APPS["web"][0], "name": APPS["web"][2], "q": q,
+                    "search": True, "ch": None}
+    if any(t.lstrip("'").startswith("site") for t in tokens):
+        q = _clean_query([t for t in tokens if not t.lstrip("'").startswith("site")])
+        if q:
+            return {"act": "in_app", "app": "web", "pkg": APPS["web"][0], "name": APPS["web"][2], "q": q,
+                    "search": False, "ch": None}
+    if any(t in MUSIC_VERBS for t in tokens):          # "X'in son şarkısını çal" -> play it on YouTube
+        q = _clean_query(tokens)
+        if q:
+            return {"act": "yt_play", "q": q}
     if len(tokens) <= 2:                              # whole short phrase close to an app name ("Metafy")
         flat = "".join(t.lstrip("'") for t in tokens if t not in PLAY_VERBS)
         for key, (pkg, forms, name) in APPS.items():

@@ -139,3 +139,23 @@ transparent theme, `hasCode=false`). It shows up as a normal TV app tile (Projec
 - Android's own volume panel is hidden behind the host mpv, so volume keys during live TV draw an Android-TV-style
   vertical bar on the right (mpv overlay, 2.5 s, composed on top of whatever overlay is showing; orange above 100 %).
 - The channel list closes after 6 s without a key (was 12 s, felt too long).
+
+## 14.9 Key behaviour fixes (2026-11-16) ✅
+
+- **PageUp / PageDown belong to Android** (page scrolling, also with the air-mouse). They only change channels
+  while live TV (host mpv) is on screen; only dedicated CHANNEL keys open live TV from Android.
+- **Held OK / Back / Home = one press.** Only arrows and channel keys repeat (one step per 0.35 s), volume
+  repeats freely. Holding OK used to re-open/select the list repeatedly.
+- **Zapping veil.** mpv keeps the last frame frozen while the next stream loads, which looked like a hang. A dark
+  full-screen card ("7 · Kanal 7 · açılıyor…") covers the picture until the first new frame, like a real TV.
+- **Slow playlists.** Some CDNs answer their long DVR playlists in 3–6 s; the variant probe timeout is 9 s (5 s
+  made such channels fail to open about half the time).
+
+## 14.10 Nightly Android backup + rollback ✅
+
+`files/usr/local/bin/tv-backup.sh` + `tv-backup.timer` (04:40, waits for an idle TV) snapshot
+`/root/.local/share/waydroid/data` with `rsync --link-dest` (unchanged files cost no space) into
+`/var/lib/tv-backup/`, freezing the Android container for the ~30 s copy so app databases are consistent.
+Keeps 7 daily + 4 Sunday snapshots and the installed-app list of each. `tv-backup.sh now` before installing an
+untrusted APK; `tv-restore.sh` lists snapshots, `tv-restore.sh <name>` snapshots the current state first, then
+rolls back and restarts Android. Reference: first snapshot 3.8 GB, 27 s.

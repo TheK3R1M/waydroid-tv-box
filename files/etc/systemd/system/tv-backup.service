@@ -1,0 +1,8 @@
+[Unit]
+Description=Nightly snapshot of Android user data (rollback after a bad APK)
+
+[Service]
+Type=oneshot
+Nice=15
+IOSchedulingClass=idle
+ExecStart=/usr/local/bin/tv-backup.sh
