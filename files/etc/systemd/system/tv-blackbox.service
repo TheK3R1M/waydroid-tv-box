@@ -1,0 +1,12 @@
+[Unit]
+Description=TV blackbox monitor (state every 3 s, Android crash lines, snapshots on change)
+After=tv-android.service tv-remote.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/bin/tv-blackbox.py
+Restart=always
+RestartSec=3
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

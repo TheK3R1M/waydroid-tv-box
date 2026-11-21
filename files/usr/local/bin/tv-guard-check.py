@@ -19,13 +19,18 @@ LOG = "/var/log/tv-guard.log"
 REMOTE_LOG = "/var/log/tv-remote.log"
 ANDROID_IP = "__ANDROID_IP__"
 ADB = ["adb", "-s", ANDROID_IP + ":5555"]
-WATCH = []    # package names of apps that get quarantined on an anomaly (empty = log only). Example: ["com.example.app"]
+WATCH = []          # apps that get quarantined on an anomaly
 UPLOAD_MBIT = 15
 MAX_CONN, MAX_DST = 1500, 250
 DATA = "/root/.local/share/waydroid/data"
-# ELF files that are known and expected: sha256 of packer/runtime libs of apps YOU approved (checked by hand).
-# Empty by default: any new ELF in Android user data is then reported as an anomaly.
-ELF_ALLOW = set()
+# ELF files that are known and expected (checked by hand): NETFLY's 360-Jiagu packer libs, byte-identical to the
+# copies inside its APK. Anything else that appears is still treated as an anomaly.
+ELF_ALLOW = {
+    "5653c9f2d92a77fbeaeb0685e4e865edb1cdf51cac1564ba6e92b853884648a4",
+    "30b7ecf0a8df7bf5f9e2b104e6a0584f7b6fad1b658cbe349d1076c72959ffe8",
+    "614e232fb247595d0518e8dbd8b26601e73ad5d27d18ff0059588125af943046",
+    "8afe2db847cf08df851e281e920a188e52dce804951386c4d2d981cf628a75dc",
+}
 
 
 def sh(cmd, t=20):

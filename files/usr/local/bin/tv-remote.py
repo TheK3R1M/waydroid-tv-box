@@ -211,8 +211,10 @@ def mpv_alive():
     return p is not None and p.poll() is None
 
 
-def mpv_stop():
-    """Close the player window and give the screen back to Android."""
+def mpv_stop(home=False):
+    """Close the player window and give the screen back to Android.
+    home=True (user left live TV): also send HOME, otherwise Android shows whatever stale activity
+    was under the player (black screen after Back/Home from channels, 2026-11-20)."""
     p = _split["proc"]
     _split["proc"] = None
     if p and p.poll() is None:
@@ -221,7 +223,15 @@ def mpv_stop():
             p.wait(2)
         except Exception:
             p.kill()
-    android("input keyevent 224", timeout=5)   # wake Android again
+    if not home:
+        android("input keyevent 224", timeout=5)   # wake Android again
+        return
+    for _ in range(2):
+        android("input keyevent 224; sleep 0.3; input keyevent 3", timeout=6)
+        time.sleep(0.8)
+        if "projengmenu" in adb_out("dumpsys window | grep mCurrentFocus", timeout=5):
+            return
+    log_action("127.0.0.1", "UYARI: kanallardan çıkışta ana menü açılamadı")
 
 
 def mpv_ensure():
@@ -471,7 +481,7 @@ def split_off(to_single=True):
             _split["on"] = mpv_start()
             return _split["on"]
         _split["on"] = False
-        mpv_stop()
+        mpv_stop(home=True)
         return True
     return run_latest(go)
 
@@ -542,7 +552,7 @@ def _split_watch():
 threading.Thread(target=_split_watch, daemon=True).start()
 
 
-ADB_IME = "com.android.adbkeyboard/.AdbIME"
+ADB_IME = "org.tvbox.klavye/.KlavyeIME"   # visible TV keyboard with ADBKeyboard-compatible broadcasts
 TV_IME = "com.android.inputmethod.leanback/.service.LeanbackImeService"
 _ime = {"on": False, "t": 0, "lock": threading.Lock()}
 # While any phone has the remote page open (it polls /state every 4 s) Android uses ADBKeyboard,
@@ -778,6 +788,59 @@ def log_action(ip, what):
             open(LOG_FILE, "w", encoding="utf-8").writelines(lines)
     except Exception:
         pass
+
+
+BB_LOG = "/var/log/tv-blackbox.log"
+BB_CMD = ["/usr/bin/python3", "/usr/local/bin/tv-blackbox.py"]
+
+
+def _tail_lines(path, n, nbytes=300_000):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - nbytes))
+            return f.read().decode("utf-8", "replace").splitlines()[-n:]
+    except Exception:
+        return []
+
+
+def debug_page(marked=False):
+    """Plain-HTML state page for diagnosing a problem by time (LAN only)."""
+    import html, subprocess
+    snap = ""
+    try:
+        snap = subprocess.run(BB_CMD + ["--snap"], capture_output=True, text=True, timeout=25).stdout.strip()
+    except Exception as e:
+        snap = f"snapshot hata: {type(e).__name__}"
+    mode = _split.get("mode")
+    remote = (f"remote: mpv_alive={mpv_alive()} on={_split['on']} mode={mode} "
+              f"left={src_name(_split['src']['left']) if _split['src'].get('left') else '-'} "
+              f"sürüm={version()}")
+    bb = _tail_lines(BB_LOG, 30)
+    crashes = [l for l in _tail_lines(BB_LOG, 3000) if " CRASH " in l][-15:]
+    marks = [l for l in _tail_lines(BB_LOG, 3000) if " MARK " in l or "SNAP[" in l][-5:]
+    rem = ["\\t".join(r) for r in read_log(15)]
+    esc = lambda s: html.escape(s)
+    notice = "<p class=ok>Kaydedildi: KULLANICI SORUN BİLDİRDİ (kara kutu + kumanda kaydı).</p>" if marked else ""
+    page = (
+        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>Hata ayıklama</title><style>"
+        "body{background:#0e0e10;color:#ddd;font:14px system-ui;margin:10px}a{color:#7aa2ff}"
+        "pre{background:#16181d;padding:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;font-size:12px}"
+        "h3{margin:14px 0 4px;color:#fff}button{font:inherit;padding:10px 16px;border:0;border-radius:8px;"
+        "background:#7a1f1f;color:#fff;font-weight:650}.ok{color:#8f8}"
+        "</style>"
+        f"<p><a href='/'>← Kumanda</a> · <a href='/log'>Kim ne yaptı</a> · <a href='/debug'>yenile</a></p>"
+        f"<h3>Şimdi</h3><pre>{esc(snap)}\n{esc(remote)}</pre>"
+        f"{notice}<form method=post action='/debug/mark'><button>Sorun bildir</button></form>"
+        "<p>Sorun yaşadığın anda bas: o andaki durum kara kutuya ve kumanda kaydına yazılır.</p>"
+        f"<h3>Son 30 kara kutu satırı</h3><pre>{esc(chr(10).join(bb))}</pre>"
+        f"<h3>Son çökme / ANR satırları</h3><pre>{esc(chr(10).join(crashes) or '(yok)')}</pre>"
+        f"<h3>Son işaretler</h3><pre>{esc(chr(10).join(marks) or '(yok)')}</pre>"
+        f"<h3>Kumanda kaydı (son 15)</h3><pre>{esc(chr(10).join(rem))}</pre>"
+        "<p style='color:#777'>Zamana göre inceleme (host): tv-why HH:MM</p>"
+    )
+    return page.encode()
 
 
 def read_log(n=150):
@@ -1972,6 +2035,8 @@ class H(http.server.BaseHTTPRequestHandler):
                     "td:nth-child(2){color:#fff;font-weight:600}</style>"
                     f"<p><a href='/'>← Kumanda</a> · son 200 işlem (en yeni üstte)</p><table>{rows}</table>")
             return self.send(200, page.encode(), "text/html; charset=utf-8")
+        if p == "/debug":
+            return self.send(200, debug_page(), "text/html; charset=utf-8")
         self.send(404)
 
     def do_POST(self):
@@ -1982,6 +2047,13 @@ class H(http.server.BaseHTTPRequestHandler):
         u = urlparse(self.path)
         parts = u.path.strip("/").split("/")
         ip = self.client_address[0]
+        if u.path == "/debug/mark":
+            log_action(ip, "KULLANICI SORUN BİLDİRDİ")
+            try:
+                subprocess.run(BB_CMD + ["--mark", "KULLANICI SORUN BİLDİRDİ"], capture_output=True, timeout=25)
+            except Exception:
+                pass
+            return self.send(200, debug_page(marked=True), "text/html; charset=utf-8")
         if parts and parts[0] == "voice":
             if not ipaddress.ip_address(ip).is_loopback:
                 return self.send(403)
@@ -2179,7 +2251,7 @@ class H(http.server.BaseHTTPRequestHandler):
             log_action(ip, "yazı gönderdi")
         elif parts == ["sys", "tvrestart"]:
             log_action(ip, "TV'Yİ DÜZELT (Android yeniden başlatıldı)")
-            subprocess.Popen(["systemctl", "restart", "tv-android"]); ok = True
+            subprocess.Popen(["systemd-run", "--unit=tv-fix", "--collect", "/usr/local/bin/tv-fix.sh"]); ok = True
         elif parts == ["sys", "reboot"]:
             log_action(ip, "CİHAZ YENİDEN BAŞLATILDI")
             subprocess.Popen(["sh", "-c", "sleep 2; systemctl reboot"]); ok = True

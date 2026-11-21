@@ -4,7 +4,6 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-EnvironmentFile=-/etc/tv/env
 Type=oneshot
 Nice=10
 ExecStart=/usr/bin/python3 /usr/local/bin/tv-channels-extra.py --write

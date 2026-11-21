@@ -1,0 +1,9 @@
+[Unit]
+Description=TV: restart the screen stack when Weston stops scanning out after TV power-on
+After=tv-weston.service
+[Service]
+ExecStart=/usr/local/bin/tv-weston-watch.sh
+Restart=always
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

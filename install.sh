@@ -43,7 +43,8 @@ FILES_core="etc/tv/env etc/tv/weston.ini etc/systemd/logind.conf.d/10-tv-no-powe
  etc/systemd/system/tv-android.service etc/systemd/system/tv-android-heal.service etc/systemd/system/tv-android-heal.timer
  etc/systemd/system/waydroid-container.service.d/override.conf etc/systemd/system/waydroid-container.service.d/no-debugfs.conf
  usr/local/bin/setup-binderfs.sh usr/local/bin/waydroid-no-debugfs.sh usr/local/bin/tv-android-heal.sh usr/local/bin/tvshot
- var/lib/waydroid/waydroid_base.prop"
+ usr/local/bin/tv-weston-watch.sh usr/local/bin/tv-weston-follow.sh etc/systemd/system/tv-weston.service.d/20-follow.conf
+ etc/systemd/system/tv-weston-watch.service var/lib/waydroid/waydroid_base.prop"
 FILES_wireless="etc/modprobe.d/rtw89-stable.conf etc/systemd/system/wifi-watchdog.service usr/local/bin/wifi-watchdog.sh"
 FILES_remote="usr/local/bin/tv-remote.py usr/local/share/tv-remote/index.html etc/systemd/system/tv-remote.service
  usr/local/bin/tv-remote-restart-when-idle.sh usr/local/bin/tv-adb-lan.sh etc/systemd/system/tv-android.service.d/adb.conf
@@ -343,7 +344,7 @@ install_core() {
   deploy var/lib/waydroid/waydroid_base.prop
   reload_units
   run systemctl enable --now waydroid-container
-  run systemctl enable --now tv-android tv-android-heal.timer
+  run systemctl enable --now tv-android tv-android-heal.timer tv-weston-watch
   if [ "$DRY" = 0 ]; then
     if wait_boot; then info "Android booted"; else warn "Android did not report boot in 10 min (see journalctl -u tv-android)"; fi
     detect_android_ip

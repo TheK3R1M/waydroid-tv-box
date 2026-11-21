@@ -191,6 +191,37 @@ def main():
                 print("hallucination dropped", flush=True); text = ""
             post("/voice", {"text": text}) if text and not text.startswith(("[", "(")) else post("/voice/fail")
 
+    def kb_mic():
+        """The on-screen TV Klavye's mic key logs 'KlavyeMic: start' (Android can't reach the host);
+        treat it like a tap on the remote's voice key: listen until silence, transcribe, type."""
+        while True:
+            try:
+                subprocess.run(["adb", "connect", "__ANDROID_IP__:5555"], capture_output=True, timeout=10)
+                p = subprocess.Popen(["adb", "-s", "__ANDROID_IP__:5555", "logcat", "-T", "1", "-s", "KlavyeMic:I"],
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="ignore")
+                for line in p.stdout:
+                    if "start" not in line or "KlavyeMic" not in line:
+                        continue
+                    if state.get("tap"):
+                        state["tap"].set(); continue
+                    if work.locked() or state["down"] or time.time() - state.get("last", 0) < 0.8:
+                        continue
+                    if not rec.start():
+                        post("/voice/fail"); continue
+                    state["last"] = time.time(); post("/voice/listen")
+                    stop = threading.Event(); state["tap"] = stop
+                    def tap(stop=stop):
+                        endpoint(rec, stop)
+                        state["tap"] = None
+                        finish(rec.stop())
+                    threading.Thread(target=tap, daemon=True).start()
+                p.wait()
+            except Exception as e:
+                print("kb mic:", e, flush=True)
+            time.sleep(5)
+
+    threading.Thread(target=kb_mic, daemon=True).start()
+
     while True:
         if time.time() - last_scan > 5:
             last_scan = time.time()
