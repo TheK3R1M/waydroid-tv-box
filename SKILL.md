@@ -15,6 +15,18 @@ Read this file first. It tells you the order of work, the verify gate that ends 
 
 Do not use it for a different architecture (for example, a VM with GPU passthrough). It can be a starting point; the hardware and rules differ.
 
+## Fast path: the installer (use this first)
+
+`install.sh` at the repo root does phases 0–12 as modules (`core remote live-tv voice keyboard guard backup`), each with install, verify and `--uninstall`. Run it on the Proxmox host as root:
+
+1. `bash install.sh --modules core,remote --dry-run` and show the plan. Nothing changes in dry-run.
+2. Ask the owner in plain language, one question at a time: admin PC LAN address (required for `remote`), the name the remote answers to (default `tvbox.home.arpa`), which optional modules (`live-tv`, `keyboard`, `guard`, `backup` default yes; `voice` default no because it needs a microphone remote and a ~500 MB model). Explain that `core` is always installed.
+3. Run the real install for the chosen modules with `--yes` only after the owner has confirmed the plan. Watch the log (`/var/log/tvbox-install.log`).
+4. Read each module's `verify` output. A FAIL is not done: fix or report it, do not skip it.
+5. Things the installer will NOT do, so tell the owner: change `/etc/network/interfaces` or WiFi credentials, restart `tv-android` (interrupts a film; a drop-in applies on the next restart), add a Google account, install family apps, or create a public certificate.
+
+The module steps are still being re-tested on a clean host; the phase list below is the manual reference for what each module does and for repairing a box that the installer did not build.
+
 ## Ground rules that come before any phase
 
 1. **Find out who is watching.** The TV is a family device. Before any action on Android or the screen, run the check in [docs/13-agent-rules.md](docs/13-agent-rules.md) rule 1 (`pgrep -x mpv`, `dumpsys audio`, the remote log). If someone is watching, diagnose read-only only.

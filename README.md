@@ -1,107 +1,145 @@
-# Spike TV box: rebuild kit
+# Waydroid TV box: one-command installer and agent kit
 
-Bu depo, bir evdeki TV kutusunu (Proxmox üzerinde headless Linux, HDMI ile TV'ye bağlı, Waydroid ile Android TV 13, canlı kanallar için host mpv, telefonlardan LAN web kumandası) sıfırdan kurmak için bir **beceri seti** (skill set) olarak hazırlanmıştır. Bir insan da, bir AI ajanı da aynı sırayla ilerleyerek kutuyu yeniden üretebilir.
+Turn a mini PC on Proxmox VE into a living-room TV box: Android TV 13 (Waydroid) for apps, a host-side
+player for live channels with split screen, and a web remote your family opens in a phone browser on the
+LAN. Built and tested on one real box; the installer is modular, so you install only what you want.
 
-> **Gövde dili Türkçe, başlıklar İngilizce.** Ajan için giriş noktası: [SKILL.md](SKILL.md). Adım adım kurulum: [docs/](docs/). Doğrulama listesi: [CHECKLIST.md](CHECKLIST.md).
->
-> **Durum etiketleri:** ✅ = referans kutuda doğrulandı · ❔ = doğrulanmadı / kısmen doğrulandı · ⚠️ = tehlike.
+> Status: the installer is new. Its module steps are not yet re-tested end to end on a clean host, and
+> the kit files are not yet re-synced with the live source. The reference box is the source of truth.
+> Items marked ❔ in [docs/](docs/) are not verified.
 
-## Ne işe yarar
+## What you get
 
-- Proxmox VE 9.x (Debian 13) üzerinde headless bir TV kutusu: Weston kiosk (DRM), PipeWire/WirePlumber ses, Waydroid (Android TV 13, ARM çeviri katmanı).
-- Canlı kanallar ve bölünmüş ekran host üzerinde mpv ile oynar; Android'in üstünde durur.
-- Aile telefonları LAN'daki web kumandasını açar ("Ana ekrana ekle"). Fiziksel USB hava-faresi kumanda da canlı yayında çalışır ❔.
-- Android LAN'dan izole edilir (internet açık); bir bot gibi davranan uygulamaları tv-guard karantinaya alır ❔.
-- PC'den HDMI çıkışını izleme ve adb/scrcpy ile kontrol.
+- **Core:** Weston kiosk on HDMI, PipeWire audio, Waydroid Android TV 13 with software video decode, a
+  heal timer for the "failed to attach" storms, and the power key ignored (a USB remote's power key no
+  longer shuts the box down).
+- **Remote:** a single-screen web remote on `http://<box>:8090` (add it to the home screen): volume with a
+  visible boost, D-pad with tap, hold and slide, typing, app shortcuts, an audit log.
+- **Live TV:** a curated Turkish channel list (probed from your box) played in a host mpv above Android,
+  with split screen. The installer adds no piracy or stream-scraper apps.
+- **Voice (optional):** offline Turkish speech-to-text for a remote with a microphone (whisper.cpp).
+- **TV Klavye (optional):** an on-screen Turkish keyboard built from source, set as default input method.
+- **Guard (optional):** Android cannot reach your LAN, but the internet stays open; a per-minute checker
+  quarantines apps that behave like bots.
+- **Backup (optional):** nightly rsync of Android data.
 
-## Mimari
+## Hardware
 
-```
-  Aile telefonları (Android, LAN)           Yönetici PC (Windows)
-  ───────────────────────────               ─────────────────────
-  http://<TV_HOST_IP>:8090                  adb / scrcpy (5555, yalnız PC'den DNAT)
-  https://<TV_HOSTNAME> (isteğe bağlı)      ffplay "TV Ekran (HDMI)" (ssh → tv-hdmi-stream)
-            │                                         │
-            ▼                                         ▼
- ┌──────────────── Proxmox VE (Debian 13, host = root) ─────────────────────────────────┐
- │  tv-remote.py  (:8090 http, :443 https, stdlib)                                       │
- │     ├─ adb shell (kalıcı, onaylı komutlar) ─────────┐                                 │
- │     ├─ pactl (HDMI sink ses seviyesi)               │                                 │
- │     ├─ mpv IPC /run/tv/mpv-split.sock ──┐           │                                 │
- │     └─ evdev köprüsü: USB kumanda → aksiyonlar ◄────┼── (canlı yayın sırasında) ❔     │
- │                                          ▼          ▼                                 │
- │  tv-weston (kiosk-shell, DRM, DP-3 1920x1080)                                         │
- │     ├─ mpv (host; canlı kanal + bölünmüş ekran, Android'in üstünde)                   │
- │     └─ Waydroid Android TV 13 (tam ekran, ayrıcalıklı LXC, binder) ── waydroid0       │
- │                                                                  <waydroid0 subnet>     │
- │  tv-pipewire → tv-pipewire-pulse + tv-wireplumber → HDMI ses çıkışı                   │
- │  tv-net-isolate: Android → yalnız internet (RFC1918/CGNAT/link-local DROP)            │
- │     └─ tv-guard: TV-GUARD zinciri + dakikalık denetim ve karantina ❔                 │
- │  tv-android-heal (1 dk zamanlayıcı): "failed to attach" fırtınasında Android'i yeniden başlatır │
- │  logind: güç tuşu yok sayılır (uzaktan kumandanın güç tuşu kutuyu kapatmaz) ✅        │
- └────────────────────────────────────────────────────────────────────────────────────────┘
-                       │ HDMI (DP-3)
-                       ▼
-                 Salon TV (CEC yok)
-```
+| Need | Minimum | Reference box |
+|---|---|---|
+| CPU | 4 cores, x86-64, AMD or Intel iGPU | AMD Ryzen Embedded R2314 (Zen+), 4 cores |
+| RAM | 8 GB (live TV and voice are heavy) | 13 GB |
+| Disk | 20 GB free on `/` | 68 GB root |
+| Display | one HDMI or DisplayPort output to the TV | DP to HDMI passive cable (no CEC) |
+| Network | host on the LAN (Ethernet or WiFi) | WiFi RTL8852BE (`rtw89`) |
 
-## Donanım (referans kutu)
+Proxmox VE 9 on Debian 13 is the tested host. The installer runs as root on the Proxmox host.
 
-| Ne | Değer |
-|---|---|
-| CPU | AMD Ryzen Embedded R2314 (Zen+, family 23 model 24), 4 çekirdek. **Android TV 16 açılmaz; ATV 13 kullanın.** |
-| RAM | 13 GB |
-| iGPU | AMD Raven2 (Vega), HDMI çıkışı DP-3 |
-| WiFi | RTL8852BE (`rtw89`) = uplink. Kablolu NIC kullanılmıyor. |
-| Depolama | 68 GB kök + 141 GB local-lvm |
-| Diğer | Bir USB 2.4 GHz hava-faresi kumanda (CEC yoksa tek fiziksel kumanda seçeneği) |
+## Install (one command)
 
-Ayrıntı ve bilinen tuzaklar: [docs/02-hardware.md](docs/02-hardware.md).
-
-## İki kurulum yolu
-
-**(a) İnsan olarak:** [docs/](docs/) klasöründeki bölümleri sırayla izleyin: 01 → 16. Her aşamanın sonunda [CHECKLIST.md](CHECKLIST.md) ilgili bölümünü işaretleyin.
-
-**(b) Bir AI ajanına vererek:** Depoyu ajana verin ve "önce SKILL.md'yi oku, sonra fazları sırayla uygula; her fazda doğrulama kapısını geçmeden ilerleme" deyin. Ajan kuralları [docs/13-agent-rules.md](docs/13-agent-rules.md) ve [SKILL.md](SKILL.md) içinde bulur.
-
-## Yer tutucuları doldurma (placeholders)
-
-Dosyalardaki `__TOKEN__` değerleri ev ağınıza özeldir. **Asla orijinal kitte doldurmayın.** Bir kopya alın:
+On the Proxmox host, as root:
 
 ```bash
-cp -a tv-setup-kit tv-setup-kit-filled
-TV_HOST_IP=192.168.10.5 ADMIN_PC_IP=192.168.10.9 LAN_CIDR=192.168.10.0/24 \
-GATEWAY_IP=192.168.10.1 TV_HOSTNAME=tv.example.lan ANDROID_IP=<waydroid-ip> \
-WIFI_SSID=<ssid> AIRPLAY_PIN=<4 digits> \
-tools/fill-placeholders.sh tv-setup-kit-filled
+curl -fsSL https://raw.githubusercontent.com/TheK3R1M/waydroid-tv-box/main/install.sh | bash
 ```
 
-`ANDROID_IP`, Waydroid'in `waydroid0` üzerindeki konteyner adresidir (`waydroid status` ile bakın, `192.168.240.x`).
-`check-placeholders.sh` hâlâ `__TOKEN__` bulursa hata verir. Örnek adresler belgelemedir; kendi ağınızı kullanın.
+Or from a checkout:
 
-## Depo düzeni
+```bash
+bash install.sh                                              # interactive: pick modules
+bash install.sh --modules core,remote,live-tv,voice,keyboard,guard,backup --yes
+bash install.sh --modules core,remote --dry-run              # print the plan, change nothing
+```
 
-| Yol | İçerik |
+Preflight detects the CPU family (Zen+ gets the Android TV 13 image), the connected display connector,
+RAM, disk, the uplink and the LAN subnet. It asks for the admin PC address (the only machine allowed to
+use adb and the HDMI viewer) and the name the remote answers to. Everything is logged to
+`/var/log/tvbox-install.log`; installed modules are recorded in `/etc/tvbox/installed`.
+
+Environment overrides for unattended runs: `TV_HOST_IP`, `GATEWAY_IP`, `LAN_CIDR`, `ADMIN_PC_IP`
+(required with `remote`), `TV_HOSTNAME`, `ANDROID_IP`, `VPN_ROUTER_IP`.
+
+### Modules
+
+| Module | What it installs | Default |
+|---|---|---|
+| `core` | Weston kiosk, PipeWire, Waydroid Android TV 13, heal timer, power-key drop-in | always |
+| `remote` | Phone web remote (port 8090), adb LAN rule for the admin PC | yes |
+| `live-tv` | Host mpv live channels, split screen, `yt-dlp`, channel list (needs `remote`) | yes |
+| `voice` | whisper.cpp voice key (needs `remote` and a remote with a microphone) | no |
+| `keyboard` | TV Klavye keyboard, built from source, default input method | yes |
+| `guard` | LAN isolation for Android, tv-guard watchdog | yes |
+| `backup` | Nightly Android data backup at 04:40 | yes |
+
+Each module has install, verify and uninstall steps. Verify runs at the end of every install and prints
+PASS or FAIL per check. Remove one module with `bash install.sh --uninstall <module>`; apt packages and the
+Waydroid image stay.
+
+## Agent install
+
+Open Claude Code (or another coding agent) in this repository and say: **"install the TV box"**. The agent
+reads [SKILL.md](SKILL.md), runs the installer with preflight, asks the plain-language questions (admin PC
+address, modules, the remote's name), runs each module's verify step and reports what passed. It does not
+install apps for your family and does not type credentials.
+
+## Compatibility
+
+| Platform | Image | Result |
+|---|---|---|
+| Ryzen Embedded R2314 (Zen+, family 23 model 24), Proxmox VE 9 / Debian 13 | Android TV 13 (LineageOS 20 + GApps) | ✅ works (reference box) |
+| Same CPU | Android TV 16 | ❌ does not boot (BoringSSL FIPS aborts on the RDRAND bug; zygote never starts) |
+| Other CPUs and GPUs | Android TV 13 | ❔ not tested |
+
+## Privacy and safety defaults
+
+- Nothing is exposed to the internet. The remote listens on the LAN and checks the Host header and origin.
+  The installer creates no public DNS record, port forward or certificate.
+- Android is isolated from the LAN; the internet stays open. adb is reachable only from the admin PC.
+- Software video decode is set by default; the power key is ignored.
+- The installer installs no streaming apps that scrape pirated sources and sets up no VPN routing.
+- Secrets (the keyboard signing key, adb keys) stay on the box in root-only paths and never go into the repo.
+- Untrusted APKs can run on this box. Check them first (for example by VirusTotal hash) and never install
+  apps for other people without asking.
+
+## Repository layout
+
+| Path | Content |
 |---|---|
-| [SKILL.md](SKILL.md) | Ajan giriş noktası: fazlar, doğrulama kapıları, kurallar |
-| [docs/](docs/) | Bölümler: 01 genel bakış … 13 ajan kuralları, 14 fiziksel kumanda, 15 tv-guard, 16 değişiklikler, A dosya listesi, B açık konular |
-| [CHECKLIST.md](CHECKLIST.md) | Doğrulama listesi (çıktıyı gördüğünüzde işaretleyin) |
-| `files/` | Hedef yollarını yansıtır (`cp -a files/. /`): `/etc`, `/usr/local/bin`, `/var/lib/waydroid` |
-| `optional/` | Varsayılan olarak kurulmaz: AirPlay (UxPlay), salt-okunur tanı betiği |
-| `pc/` | Windows yardımcıları: HDMI izleyici, scrcpy kısayolları, sertifika yenileme |
-| `tools/` | Doldurma, yer tutucu kontrolü, gizlilik taraması, uzaktan kumanda dağıtımı, UI mock |
+| `install.sh` | Modular installer: preflight, modules, verify, uninstall |
+| [SKILL.md](SKILL.md) | Agent entry point: phases, verify gates, rules |
+| [docs/](docs/) | Notes per phase; open items in `docs/B-open-items.md`; Turkish architecture notes in `docs/00-architecture-tr.md` |
+| [CHECKLIST.md](CHECKLIST.md) | Verification list |
+| `files/` | Config and scripts, installed to the same path under `/` (placeholders filled at install) |
+| `android/` | APK sources: TV Klavye, assistant bar, Kanallar tile |
+| `optional/` | Not installed by default: AirPlay, diagnostics |
+| `pc/` | Windows helpers: HDMI viewer, scrcpy shortcuts, certificate renewal |
+| `tools/` | Placeholder check, privacy scan, remote sync and deploy helpers |
 
-## Durum (özet)
+## Credits
 
-Canlı kutu doğrulanmış çalışan bir sistemdir; bu kit onun sanitize edilmiş, yeniden üretilebilir hâlidir. Yeni bölümler (fiziksel kumanda köprüsü, tv-guard, Firefox, ARM çeviri, [sesli kumanda](docs/17-voice-key.md)) için ❔ işaretleri geçerlidir. Ayrıntı: [docs/16-changes-2026-11.md](docs/16-changes-2026-11.md) ve [docs/B-open-items.md](docs/B-open-items.md).
+- Turkish word list for TV Klavye: [FrequencyWords](https://github.com/hermitdave/FrequencyWords)
+  (Turkish subtitle corpus), licensed CC-BY-SA 4.0. The derived list in `android/klavye/assets/` keeps that licence.
+- Channel discovery: [iptv-org](https://github.com/iptv-org/iptv) public playlists, plus broadcasters' own
+  players, all probed before use.
+- [Waydroid](https://waydro.id) and the WayDroid-ATV Android TV 13 build; [whisper.cpp](https://github.com/ggml-org/whisper.cpp);
+  [yt-dlp](https://github.com/yt-dlp/yt-dlp); [mpv](https://mpv.io); [Weston](https://gitlab.freedesktop.org/wayland/weston).
 
-## Gizlilik ve güvenlik
+## License
 
-- Depoda ev ağı adresi, cihaz listesi, MAC adresi, sertifika/özel anahtar, Wi-Fi parolası, token veya PIN **yoktur**. `tools/privacy-scan.sh` bunu commit öncesi kontrol eder.
-- Korsan/akış-kazıyıcı uygulamalar belgelenmez ve kurulmaz.
-- Bu kutu güvenilmeyen APK'ları çalıştırabilir. LAN izolasyonu bunu sınırlar, bir sanal makinenin yerini tutmaz ([docs/10-security.md](docs/10-security.md)).
-- Herhangi bir dış erişim (DNS, port, sertifika) yalnızca sahibin açık onayıyla yapılır.
+MIT. See [LICENSE](LICENSE). Provided as is: you are responsible for your network, your TV and every app you install.
 
-## Lisans
+---
 
-MIT. Bkz. [LICENSE](LICENSE). Bu depo bir uyarı olmaksızın "olduğu gibi" sunulur: ağ, TV ve uygulamalarınızda sorumluluk sizindir; kurulum yapmadan önce kendi donanımınızda ve ağınızda test edin. Üçüncü taraf uygulamaların hüküm ve lisansları geçerlidir.
+## Türkçe (kısa)
+
+Bu depo, Proxmox üzerindeki bir mini PC'yi salon TV kutusuna çevirir: Waydroid ile Android TV 13,
+canlı kanallar için host mpv (bölünmüş ekran dahil) ve ailenin telefon tarayıcısından açtığı LAN kumandası.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TheK3R1M/waydroid-tv-box/main/install.sh | bash
+```
+
+Modüller: `core` (zorunlu), `remote`, `live-tv`, `voice`, `keyboard`, `guard`, `backup`. Her modülün kurulum,
+doğrulama ve kaldırma adımı var: `bash install.sh --uninstall <modül>`. Ryzen Embedded R2314 üzerinde
+Android TV 13 çalışır; TV 16 açılmaz. Korsan yayın uygulaması kurulmaz. Mimari notlar:
+[docs/00-architecture-tr.md](docs/00-architecture-tr.md).
