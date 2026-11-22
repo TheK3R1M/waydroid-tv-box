@@ -35,20 +35,22 @@ final class Predictor {
     private String[] words = new String[0];
     private long[] freq = new long[0];
     private long top = 1;
+    private final boolean learnOn;
     private final SharedPreferences sp;
     private final Map<String, Integer> learned = new HashMap<>();
     private final Map<String, Integer> pairs = new HashMap<>();
 
-    Predictor(Context c) {
-        sp = c.getSharedPreferences("learn", Context.MODE_PRIVATE);
-        for (Map.Entry<String, ?> e : sp.getAll().entrySet()) {
+    Predictor(Context c, String lang, boolean learnOn) {
+        this.learnOn = learnOn;
+        sp = c.getSharedPreferences("tr".equals(lang) ? "learn" : "learn_" + lang, Context.MODE_PRIVATE);
+        if (learnOn) for (Map.Entry<String, ?> e : sp.getAll().entrySet()) {
             if (!(e.getValue() instanceof Integer)) continue;
             String k = e.getKey();
             if (k.startsWith("w:")) learned.put(k.substring(2), (Integer) e.getValue());
             else if (k.startsWith("p:")) pairs.put(k.substring(2), (Integer) e.getValue());
         }
         try {
-            BufferedReader r = new BufferedReader(new InputStreamReader(c.getAssets().open("words.txt"), "UTF-8"));
+            BufferedReader r = new BufferedReader(new InputStreamReader(c.getAssets().open("en".equals(lang) ? "words_en.txt" : "words.txt"), "UTF-8"));
             List<String[]> l = new ArrayList<>();
             String line;
             while ((line = r.readLine()) != null) {
@@ -69,7 +71,7 @@ final class Predictor {
         } catch (Exception ignored) {
         }
         // TV phrases + channel names: seed word pairs (next-word prediction) and boost their words.
-        try {
+        if ("tr".equals(lang)) try {
             BufferedReader r = new BufferedReader(new InputStreamReader(c.getAssets().open("phrases.txt"), "UTF-8"));
             String line;
             while ((line = r.readLine()) != null) {
@@ -159,6 +161,7 @@ final class Predictor {
 
     /** Remember a finished word (and the pair with the word before it). */
     void learn(String prev, String w) {
+        if (!learnOn) return;
         if (w == null || w.length() < 2 || w.length() > 30) return;
         SharedPreferences.Editor e = sp.edit();
         int c = (learned.containsKey(w) ? learned.get(w) : 0) + 1;

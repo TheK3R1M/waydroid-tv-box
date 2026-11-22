@@ -30,7 +30,8 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * TV Klavye: on-screen Turkish Q keyboard for Android TV, D-pad / pointer driven,
+ * TV Klavye 4.0: on-screen keyboard for Android TV (Turkish or English), D-pad / pointer driven,
+ * configurable via the Settings screen or the org.tvbox.klavye.SET broadcast,
  * plus ADBKeyboard-compatible broadcast injection (protected by android.permission.DUMP).
  */
 public class KlavyeIME extends InputMethodService implements View.OnClickListener, AdbRx.Sink {
@@ -39,8 +40,28 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
             T_SYM = 4, T_CLEAR = 5, T_ENTER = 6, T_HIDE = 7, T_WORD = 8, T_MIC = 9;
     private static final Locale TR = new Locale("tr", "TR");
     private static final String PERM = "android.permission.DUMP";
-    private static final int KEY_H_DP = 54, MARGIN_DP = 3;
+    private static final String SET_ACTION = "org.tvbox.klavye.SET";
+    private static final int KEY_H_DP = 54, MARGIN_DP = 3, KEY_H_LARGE_DP = 72;
     private static final long BACK_REPEAT_MS = 250;
+
+    /** Turkish Q rows (classic / compact layouts). */
+    private static final String[] QWERTY_TR = {
+            "q w e r t y u \u0131 o p \u011f \u00fc",
+            "a s d f g h j k l \u015f i",
+            "z x c v b n m \u00f6 \u00e7"};
+    /** English QWERTY rows. */
+    private static final String[] QWERTY_EN = {
+            "q w e r t y u i o p",
+            "a s d f g h j k l",
+            "z x c v b n m"};
+    /** Alphabetical 4-row grids for the square layout. */
+    private static final String[] ALPHA_TR = {
+            "a b c \u00e7 d e f g", "\u011f h \u0131 i j k l m",
+            "n o \u00f6 p r s \u015f t", "u \u00fc v y z q w x"};
+    private static final String[] ALPHA_EN = {
+            "a b c d e f g", "h i j k l m n", "o p q r s t u", "v w x y z"};
+    private static final String[] SYMBOLS = {
+            "1 2 3 4 5 6 7 8", "9 0 - _ / : ; !", "@ # $ % & * ( )", "? \" ' + = ~ | ,"};
 
     private static final class K {
         final String label, out;
@@ -62,6 +83,7 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
     private FrameLayout frame, hintLayer;
     private final TextView[] hintViews = new TextView[3];
     volatile Predictor pred;
+    private String predSig;       // Settings.sig() the current predictor was built for
     private List<String> sugg = new ArrayList<>();
     private List<String> hints = new ArrayList<>();
     private boolean hintsOn;      // 3 likely next letters shown above the focused key
@@ -88,7 +110,7 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         Loader(KlavyeIME ime) { this.ime = ime; }
         public void run() {
             if (ui) { ime.refresh(); return; }
-            ime.pred = new Predictor(ime);
+            ime.pred = new Predictor(ime, Settings.lang(ime), Settings.learn(ime));
             ui = true;
             if (ime.root != null) ime.root.post(this);
         }
@@ -100,7 +122,7 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
     public void onCreate() {
         super.onCreate();
         rx = new AdbRx(this);
-        new Thread(new Loader(this)).start();
+        startLoader();
         IntentFilter f = new IntentFilter();
         f.addAction("ADB_INPUT_TEXT");
         f.addAction("ADB_INPUT_B64");
@@ -108,6 +130,7 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         f.addAction("ADB_INPUT_MCODE");
         f.addAction("ADB_EDITOR_CODE");
         f.addAction("ADB_CLEAR_TEXT");
+        // SET is handled by SetRx (manifest receiver), so it also works before the IME is shown.
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(rx, f, PERM, null, Context.RECEIVER_EXPORTED);
         } else {
@@ -163,6 +186,7 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
     @Override
     public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
+        if (!Settings.sig(this).equals(predSig)) startLoader();
         if (root != null) {
             symbols = false;
             shift = false;
@@ -191,15 +215,30 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         return false;
     }
 
-    // ---------- layout ----------
-
-    private static List<K> keys(String s) {
-        List<K> l = new ArrayList<>();
-        for (String t : s.split(" ")) {
-            if (t.length() > 0) l.add(new K(t, t, T_CHAR, 1f));
-        }
-        return l;
+    /** (Re)builds the predictor for the current settings in the background. */
+    private void startLoader() {
+        predSig = Settings.sig(this);
+        new Thread(new Loader(this)).start();
     }
+
+    private boolean isTr() {
+        return "tr".equals(Settings.lang(this));
+    }
+
+    private Locale loc() {
+        return isTr() ? TR : Locale.ENGLISH;
+    }
+
+    /** Turkish or English label, by the language setting. */
+    private String L(String tr, String en) {
+        return isTr() ? tr : en;
+    }
+
+    private int keyH() {
+        return "large".equals(Settings.keysize(this)) ? KEY_H_LARGE_DP : KEY_H_DP;
+    }
+
+    // ---------- layout ----------
 
     private static List<K> keys(String s, float w) {
         List<K> l = new ArrayList<>();
@@ -209,33 +248,84 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         return l;
     }
 
-    /** Layout D: square 8-column alphabetical grid (short horizontal travel) + right action column.
-     *  Each row = 8 units of keys + 2 units action key so the column lines up. */
-    private void buildLayout() {
-        final float A = 2f;
-        rows.clear();
-        List<K> sw = new ArrayList<>();
-        for (int i = 0; i < 2; i++) sw.add(new K(i < sugg.size() ? sugg.get(i) : "", "", T_WORD, 4f));
-        sw.add(new K("Gizle", "", T_HIDE, A));
-        rows.add(sw);
-        String[] g = symbols
-                ? new String[]{"1 2 3 4 5 6 7 8", "9 0 - _ / : ; !", "@ # $ % & * ( )", "? \" ' + = ~ | ,"}
-                : new String[]{"a b c \u00e7 d e f g", "\u011f h \u0131 i j k l m", "n o \u00f6 p r s \u015f t", "u \u00fc v y z q w x"};
-        K[] act = {new K("\u232B Sil", "", T_BACK, A), new K("Temizle", "", T_CLEAR, A),
-                new K("Ara \u23CE", "", T_ENTER, A), new K("\uD83C\uDFA4 Ses", "", T_MIC, A)};
-        for (int i = 0; i < 4; i++) {
-            List<K> r = keys(g[i], 1f);
-            r.add(act[i]);
-            rows.add(r);
-        }
+    private static K act(String label, int type, float w) {
+        return new K(label, "", type, w);
+    }
+
+    /** Bottom row for the square and compact layouts. */
+    private List<K> bottomStd() {
         List<K> r5 = new ArrayList<>();
         r5.add(new K(symbols ? "ABC" : "123", "", T_SYM, 1.5f));
         r5.add(new K("\u21E7", "", T_SHIFT, 1f));
-        r5.add(new K("Bo\u015fluk", " ", T_SPACE, 3f));
+        r5.add(new K(L("Bo\u015fluk", "Space"), " ", T_SPACE, 3f));
         r5.add(new K(".", ".", T_CHAR, 1f));
         r5.add(new K(".com", ".com", T_CHAR, 1.5f));
-        r5.add(new K("@", "@", T_CHAR, A));
-        rows.add(r5);
+        r5.add(new K("@", "@", T_CHAR, 2f));
+        return r5;
+    }
+
+    /** Rebuilds the key rows from the layout, language, mic and symbol state. */
+    private void buildLayout() {
+        final float A = 2f;
+        rows.clear();
+        boolean tr = isTr();
+        boolean mic = Settings.mic(this);
+        String layout = symbols ? "square" : Settings.layout(this);
+        String sil = L("\u232B Sil", "\u232B Delete");
+        String temizle = L("Temizle", "Clear");
+        String ara = L("Ara \u23CE", "Search \u23CE");
+        String ses = L("\uD83C\uDFA4 Ses", "\uD83C\uDFA4 Mic");
+
+        List<K> sw = new ArrayList<>();
+        for (int i = 0; i < 2; i++) sw.add(new K(i < sugg.size() ? sugg.get(i) : "", "", T_WORD, 4f));
+        sw.add(new K(L("Gizle", "Hide"), "", T_HIDE, A));
+        rows.add(sw);
+
+        if ("classic".equals(layout)) {
+            // Full-width QWERTY: Ses on row 1, Temizle on row 2, shift + letters + Sil on row 3, bottom bar.
+            String[] q = tr ? QWERTY_TR : QWERTY_EN;
+            List<K> r1 = keys(q[0], 1f);
+            if (mic) r1.add(act(ses, T_MIC, A));
+            rows.add(r1);
+            List<K> r2 = keys(q[1], 1f);
+            r2.add(act(temizle, T_CLEAR, A));
+            rows.add(r2);
+            List<K> r3 = new ArrayList<>();
+            r3.add(act("\u21E7", T_SHIFT, 1.5f));
+            r3.addAll(keys(q[2], 1f));
+            r3.add(act(sil, T_BACK, 1.5f));
+            rows.add(r3);
+            List<K> r4 = new ArrayList<>();
+            r4.add(new K(symbols ? "ABC" : "123", "", T_SYM, 1.5f));
+            r4.add(new K(L("Bo\u015fluk", "Space"), " ", T_SPACE, 4f));
+            r4.add(new K(".", ".", T_CHAR, 1f));
+            r4.add(new K(".com", ".com", T_CHAR, 1.5f));
+            r4.add(new K("@", "@", T_CHAR, 1f));
+            r4.add(act(ara, T_ENTER, 2f));
+            rows.add(r4);
+        } else if ("compact".equals(layout)) {
+            // QWERTY block (~75% width) with a right action column; bottom bar as square.
+            String[] q = tr ? QWERTY_TR : QWERTY_EN;
+            K[] col = {act(sil, T_BACK, 4f), act(temizle, T_CLEAR, 4f), act(ara, T_ENTER, 4f)};
+            for (int i = 0; i < 3; i++) {
+                List<K> r = keys(q[i], 1f);
+                r.add(col[i]);
+                rows.add(r);
+            }
+            List<K> b = bottomStd();
+            if (mic) b.add(act(ses, T_MIC, 2f));
+            rows.add(b);
+        } else {
+            // Square (default): alphabetical grid + right action column; symbols use the same shape.
+            String[] g = symbols ? SYMBOLS : (tr ? ALPHA_TR : ALPHA_EN);
+            K[] acts = {act(sil, T_BACK, A), act(temizle, T_CLEAR, A), act(ara, T_ENTER, A), act(ses, T_MIC, A)};
+            for (int i = 0; i < 4; i++) {
+                List<K> r = keys(g[i], 1f);
+                if (i < 3 || mic) r.add(acts[i]);
+                rows.add(r);
+            }
+            rows.add(bottomStd());
+        }
     }
 
     private void buildKeys() {
@@ -254,7 +344,7 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
             }
             views.add(rv);
             root.addView(row, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dp(KEY_H_DP)));
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(keyH())));
         }
         clampFocus();
         updateFocus();
@@ -311,8 +401,8 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         return k.label.length() == 1 && Character.isLetter(k.label.charAt(0));
     }
 
-    private static String up(String s) {
-        return s.toUpperCase(TR);
+    private String up(String s) {
+        return s.toUpperCase(loc());
     }
 
     private void updateFocus() {
@@ -558,14 +648,14 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
 
     private String curWord() {
         String b = before();
-        return b.substring(wordStart(b)).toLowerCase(TR);
+        return b.substring(wordStart(b)).toLowerCase(loc());
     }
 
     private String prevWord() {
         String b = before();
         b = b.substring(0, wordStart(b)).trim();
         int i = wordStart(b);
-        return b.substring(i).toLowerCase(TR);
+        return b.substring(i).toLowerCase(loc());
     }
 
     void refresh() {
@@ -575,7 +665,8 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
     private void refreshWords() {
         if (root == null || symbols) return;
         Predictor pr = pred;
-        List<String> n = pr == null ? new ArrayList<String>() : pr.words(curWord(), prevWord(), 2);
+        List<String> n = (pr == null || !Settings.suggest(this)) ? new ArrayList<String>()
+                : pr.words(curWord(), prevWord(), 2);
         if (n.equals(sugg)) return;
         sugg = n;
         List<K> sw = rows.get(0);
@@ -597,14 +688,14 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         String b = before();
         int n = b.length() - wordStart(b);
         String typed = b.substring(b.length() - n);
-        if (n > 0 && Character.isUpperCase(typed.charAt(0))) w = w.substring(0, 1).toUpperCase(TR) + w.substring(1);
+        if (n > 0 && Character.isUpperCase(typed.charAt(0))) w = w.substring(0, 1).toUpperCase(loc()) + w.substring(1);
         String prev = prevWord();
         ic.beginBatchEdit();
         if (n > 0) ic.deleteSurroundingText(n, 0);
         ic.commitText(w + " ", 1);
         ic.endBatchEdit();
         Predictor pr = pred;
-        if (pr != null) pr.learn(prev, w.toLowerCase(TR));
+        if (pr != null) pr.learn(prev, w.toLowerCase(loc()));
         hideHints();
     }
 
@@ -622,7 +713,7 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
     private void showHints(boolean letter) {
         Predictor pr = pred;
         hsel = -1;
-        if (!letter || symbols || pr == null) { hideHints(); return; }
+        if (!letter || symbols || pr == null || !Settings.letterHints(this)) { hideHints(); return; }
         String w = curWord();
         hints = w.isEmpty() ? new ArrayList<String>() : pr.letters(w, 3);
         hintsOn = !hints.isEmpty();
@@ -645,9 +736,10 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         TextView key = views.get(fr).get(fc);
         View row = (View) key.getParent();
         int w = key.getWidth(), h = key.getHeight();
-        int x = row.getLeft() + key.getLeft();
-        int y = row.getTop() + key.getTop() - h - dp(MARGIN_DP * 2);
-        int x0 = Math.max(0, Math.min(frame.getWidth() - 3 * w, x - w));   // keep all 3 on screen
+        // hint layer is the full-width frame; the keyboard (root) is centred inside it -> add root's offset
+        int x = root.getLeft() + row.getLeft() + key.getLeft();
+        int y = root.getTop() + row.getTop() + key.getTop() - h - dp(MARGIN_DP * 2);
+        int x0 = Math.max(root.getLeft(), Math.min(root.getRight() - 3 * w, x - w));   // keep all 3 chips inside the keyboard
         for (int pos = 0; pos < 3; pos++) {
             TextView t = hintViews[pos];
             String s = hintAt(pos);
@@ -714,12 +806,36 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         return super.onKeyUp(keyCode, ev);
     }
 
+    // ---------- settings ----------
+
+    /** SET broadcast: apply one option (extras key/value), then rebuild the keys right away. */
+    private void setOption(Intent i) {
+        String key = i.getStringExtra("key"), value = i.getStringExtra("value");
+        if (!Settings.set(this, key, value)) {
+            Log.w("KlavyeSet", "rejected " + key + "=" + value);
+            return;
+        }
+        if (!Settings.sig(this).equals(predSig)) startLoader();
+        if (root != null) {
+            symbols = false;
+            shift = false;
+            hintsOn = false;
+            hsel = -1;
+            swapping = false;
+            buildKeys();
+            refresh();
+        }
+    }
+
     // ---------- ADBKeyboard-compatible injection ----------
 
     void handleAdb(Intent i) {
         String a = i.getAction();
         if (a == null) return;
         switch (a) {
+            case SET_ACTION:
+                setOption(i);
+                break;
             case "ADB_INPUT_TEXT": {
                 String m = i.getStringExtra("msg");
                 if (m != null) commit(m);
