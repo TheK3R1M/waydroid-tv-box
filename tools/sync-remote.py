@@ -59,7 +59,7 @@ for s, d in PAIRS.items():
 hdir = os.path.join(src, "host")
 for f in sorted(os.listdir(hdir)):
     p = os.path.join(hdir, f)
-    if f in SKIP or os.path.isdir(p) or os.path.splitext(f)[1] in NEVER_EXT:
+    if f in ("tv-android-vol.conf", "tv-weston-20-follow.conf") or f in SKIP or os.path.isdir(p) or os.path.splitext(f)[1] in NEVER_EXT:  # drop-ins are kept under *.service.d by hand
         continue
     if f.endswith((".service", ".timer")):
         d = os.path.join(kit, "files/etc/systemd/system", f)
