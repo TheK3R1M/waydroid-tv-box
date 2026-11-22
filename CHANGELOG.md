@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-22 (options menu + zap watchdog)
+- **MENU = options panel** (TV-style, right side, live TV only): channel context (favourite, programme guide, channel list, split screen, sound side, sleep timer with value, recordings, settings); guide context (remind, record, go to channel); Settings (auto switch for reminders, browse favourites only, language, reload channel list); Recordings (play / delete). Long OK still toggles the favourite. Hold-MENU no longer cycles the sleep timer.
+- **Channel list navigation:** LEFT from any row jumps to the category tabs; tab change updates the list live; DOWN/OK returns to the remembered row; opens on the playing channel; last tab remembered; PageUp/PageDown 10 rows.
+- **Zap watchdog:** HLS master lookup has a hard 3 s deadline (stale variant or master URL used); no first frame within 8 s shows "Kanal açılamadı", retries once with the master URL, then restores the previous channel; every zap writes a line to `/var/log/tv-zap.log` (superseded ones flagged).
+- Tests: `tools/test_zap.py` (slow-CDN simulation), `tools/test_menu.py`; `tools/render_menu.py` renders every panel state for visual QA.
+
 ## 2026-11-22 (zapping + scheduling)
 - **Zapping latency:** channel changes run on one latest-wins worker; the remote/HTTP call returns at once, superseded presses never load, first-frame poll 0.1 s, unchanged mpv properties are not re-sent (fewer IPC round trips). Every change is timed in `/var/log/tv-zap.log` (lock / resolve / cache / load / frame).
 - **Scheduling (new `tvsched.py` + `tv-rec.py`):** OK on a future programme in the on-TV guide = reminder (toast 1 min before; switches by itself only if "otomatik geç" is on, else OK switches); MENU on a future programme = scheduled recording (`systemd-run --on-calendar`, ffmpeg `-c copy`, 2 min before to 5 min after, disk cap 20 GB, oldest deleted); MENU held = sleep timer 30/60/90/120/off (stops live TV, screen off, warning 1 min before); phone "Diğer" sheet has the sleep buttons and the recordings list (play / delete / cancel).

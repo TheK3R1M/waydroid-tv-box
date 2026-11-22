@@ -38,7 +38,7 @@ T = {
            "tag_left": "LEFT · ", "tag_right": "RIGHT · ", "now": "Now", "next": "Next", "no_guide": "no guide",
            "tab_fav": "★ Favorites", "tab_all": "All", "tab_search": "Search", "sort_num": "Sort: No.", "sort_az": "Sort: A-Z",
            "count": "{n} channels", "search_q": "Search: {q}", "search_hint": "Pick letters with ► (◀ deletes)",
-           "search_count": "{n} results", "search_none": "No results", "fav_empty": "No favourites yet - press MENU to add",
+           "search_count": "{n} results", "search_none": "No results", "fav_empty": "No favourites yet - MENU > Add to favourites",
            "hint_bar": "◀▶ tab   OK open   ▼ into list   Back close", "hint_rows": "▲▼ select   OK watch   ► guide   MENU ★   Back close",
            "hint_wheel": "▲▼ letter   ► add   ◀ delete   OK results   Back close", "hint_guide": "▲▼ scroll   ◀ / Back close",
            "guide_none": "No programme data", "fav_on": "★ Added to favourites", "fav_off": "Removed from favourites",
@@ -47,14 +47,14 @@ T = {
            "rec_off": "Recording cancelled", "rec_past": "Already on air", "rec_fail": "Could not schedule: {why}",
            "rem_soon": "Starts in 1 min: {title} ({name})", "rem_start_ok": "Started: {title} · OK to switch",
            "rem_switch": "Switching to {name}", "sleep_set": "Sleep timer: {n} min", "sleep_off": "Sleep timer off",
-           "sleep_warn": "TV sleeps in 1 min"},
+           "zap_fail": "Channel did not open", "sleep_warn": "TV sleeps in 1 min"},
     "tr": {"seek_behind": "Canlıdan -{n} sn", "seek_step": "{n} sn", "live": "Canlı",
            "list_title": "Kanallar", "list_hint": "▲▼ seç     OK izle     ◀ / Geri kapat",
            "side_left": "SOL EKRAN", "side_right": "SAĞ EKRAN", "watching": "● izleniyor",
            "tag_left": "SOL  ·  ", "tag_right": "SAĞ  ·  ", "now": "Şimdi", "next": "Sonra", "no_guide": "rehber yok",
            "tab_fav": "★ Favoriler", "tab_all": "Tümü", "tab_search": "Ara", "sort_num": "Sırala: Numara", "sort_az": "Sırala: A-Z",
            "count": "{n} kanal", "search_q": "Ara: {q}", "search_hint": "Harfleri ► ile ekleyin, ◀ ile silin",
-           "search_count": "{n} sonuç", "search_none": "Sonuç yok", "fav_empty": "Henüz favori yok — MENU ile ekleyin",
+           "search_count": "{n} sonuç", "search_none": "Sonuç yok", "fav_empty": "Henüz favori yok — MENU > Favorilere ekle",
            "hint_bar": "◀▶ sekme   OK aç   ▼ listeye in   Geri kapat", "hint_rows": "▲▼ seç   OK izle   ► program   MENU ★   Geri kapat",
            "hint_wheel": "▲▼ harf   ► ekle   ◀ sil   OK sonuçlar   Geri kapat", "hint_guide": "▲▼ kaydır   ◀ / Geri kapat",
            "guide_none": "Yayın akışı yok", "fav_on": "★ Favorilere eklendi", "fav_off": "Favorilerden çıkarıldı",
@@ -63,8 +63,43 @@ T = {
            "rec_off": "Kayıt iptal edildi", "rec_past": "Yayında veya bitti", "rec_fail": "Kurulamadı: {why}",
            "rem_soon": "1 dk sonra başlıyor: {title} ({name})", "rem_start_ok": "Başladı: {title} · geçmek için OK",
            "rem_switch": "{name} kanalına geçiliyor", "sleep_set": "Uyku zamanlayıcısı: {n} dk",
-           "sleep_off": "Uyku zamanlayıcısı kapandı", "sleep_warn": "TV 1 dk sonra uykuya geçecek"},
+           "sleep_off": "Uyku zamanlayıcısı kapandı", "zap_fail": "Kanal açılamadı", "sleep_warn": "TV 1 dk sonra uykuya geçecek"},
 }
+
+
+# ---- strings added with the options menu (en / tr). Hints replace the older ones above.
+T["en"].update({
+    "o_title": "Options", "o_fav_add": "Add to favourites", "o_fav_del": "Remove from favourites",
+    "o_guide": "Programme guide", "o_list": "Channel list", "o_split": "Split screen (side by side)",
+    "o_split_off": "Single screen", "o_audio": "Sound", "snd_left": "Left", "snd_right": "Right",
+    "o_sleep": "Sleep timer", "o_recs": "Recordings", "o_settings": "Settings", "o_rem": "Remind me",
+    "o_rec": "Record", "o_goto": "Go to channel", "o_auto": "Auto switch (reminders)",
+    "o_favonly": "Browse favourites only", "o_lang": "Language", "o_reload": "Reload channel list",
+    "o_play": "Play", "o_del": "Delete", "on": "On", "off": "Off", "sleep_none": "Off", "rec_none": "No recordings",
+    "rec_title": "Recordings", "rec_playing": "Playing recording", "rec_deleted": "Recording deleted",
+    "o_settings_title": "Settings", "reloaded": "Channel list reloaded", "set_saved": "Saved",
+    "hint_opts": "▲▼ select   OK choose   ◀ back   Back close",
+    "hint_rows": "◀ categories   ▶ guide   OK watch   MENU options   Back close",
+    "hint_bar": "◀▶ category   ▼ / OK back to list   Back close",
+    "hint_guide": "▲▼ select   OK remind   MENU options   ◀ / Back close",
+})
+T["tr"].update({
+    "o_title": "Seçenekler", "o_fav_add": "Favorilere ekle", "o_fav_del": "Favorilerden çıkar",
+    "o_guide": "Yayın akışı", "o_list": "Kanal listesi", "o_split": "Ekranı böl (yan yana)",
+    "o_split_off": "Tek ekran", "o_audio": "Ses", "snd_left": "Sol", "snd_right": "Sağ",
+    "o_sleep": "Uyku zamanlayıcısı", "o_recs": "Kayıtlar", "o_settings": "Ayarlar", "o_rem": "Hatırlat",
+    "o_rec": "Kaydet", "o_goto": "Kanala geç", "o_auto": "Otomatik geç (hatırlatıcı)",
+    "o_favonly": "Sadece favorilerde gezin", "o_lang": "Dil", "o_reload": "Kanal listesini yenile",
+    "o_play": "Oynat", "o_del": "Sil", "on": "Açık", "off": "Kapalı", "sleep_none": "Kapalı",
+    "rec_none": "Kayıt yok", "rec_title": "Kayıtlar", "rec_playing": "Kayıt oynatılıyor",
+    "rec_deleted": "Kayıt silindi", "o_settings_title": "Ayarlar", "reloaded": "Kanal listesi yenilendi",
+    "set_saved": "Kaydedildi",
+    "hint_opts": "▲▼ seç   OK seç/değiştir   ◀ geri   Geri kapat",
+    "hint_rows": "◀ kategoriler   ▶ program   OK izle   MENU seçenekler   Geri kapat",
+    "hint_bar": "◀▶ kategori   ▼ / OK listeye dön   Geri kapat",
+    "hint_guide": "▲▼ seç   OK hatırlat   MENU seçenekler   ◀ / Geri kapat",
+})
+
 
 
 def t(key, **kw):
@@ -277,14 +312,37 @@ _vcache = {}            # master url -> (time, media playlist url); saves one HT
 VCACHE_TTL = 600
 
 
+RESOLVE_DEADLINE = 3.0       # hard overall limit for one master -> variant lookup (incl. slow reads)
+_direct = [False]            # retry mode: load the master URL, let mpv pick the variant itself
+_fetch_pool = ThreadPoolExecutor(max_workers=8)
+
+
 def best_variant(url):
     hit = _vcache.get(url)
-    _zt["cache"] = bool(hit and time.time() - hit[0] < VCACHE_TTL)
-    if hit and time.time() - hit[0] < VCACHE_TTL:
+    fresh = bool(hit and time.time() - hit[0] < VCACHE_TTL)
+    _zt["cache"] = fresh
+    if _direct[0]:
+        return url
+    if fresh:
         return hit[1]
-    r = _best_variant(url)
+    # The lookup runs on a worker with a hard deadline: a hung CDN can never hold the zap for 30 s.
+    fut = _fetch_pool.submit(_best_variant, url)
+
+    def late(f):                         # an answer that arrives after the deadline still refreshes the cache
+        try:
+            r = f.result()
+            if r is not None:
+                _vcache[url] = (time.time(), r)
+        except Exception:
+            pass
+    fut.add_done_callback(late)
+    try:
+        r = fut.result(timeout=RESOLVE_DEADLINE)
+    except Exception:
+        r = None
+        _zt["timeout"] = True
     if r is None:
-        # master did not answer: a stale media playlist beats the master (never cache the master as "media")
+        # master did not answer in time: a stale media playlist beats the master (never cache the master as "media")
         return hit[1] if hit else url
     _vcache[url] = (time.time(), r)
     return r
@@ -296,9 +354,8 @@ def _best_variant(url):
         import urllib.request, urllib.parse
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         try:
-            # 9 s: the turknet CDN (ATV, A Spor) regularly needs 3-6 s to answer its long DVR playlist; 5 s made
-            # ATV fail to open about half the time ("ATV hep bozuk").
-            txt = urllib.request.urlopen(req, timeout=6).read(400000).decode("utf-8", "ignore")
+            # per-socket timeout; the overall limit is RESOLVE_DEADLINE in best_variant
+            txt = urllib.request.urlopen(req, timeout=2.5).read(400000).decode("utf-8", "ignore")
         except Exception:
             return None                    # unknown (not "use the master"): best_variant decides
         if "#EXT-X-STREAM-INF" not in txt:
@@ -470,16 +527,17 @@ def zap_begin(ip):
         _zt.update(press=time.monotonic(), ip=ip, st={}, name="", cache=None)
 
 
-def zap_end(ok, mode):
-    """Write the stage breakdown; also the old '(N ms)' line on the remote log (same format as before)."""
+def zap_end(ok, mode, note=""):
+    """Write the stage breakdown; also the old '(N ms)' line on the remote log (same format as before).
+    Called for EVERY zap (also superseded or failed ones), so a missing line means the worker never ran."""
     st, p = _zt["st"], _zt["press"]
-    if not p or "lock" not in st:
+    if not p:
         return
     ms = lambda k: int((st[k] - p) * 1000) if k in st else -1
     total = ms("frame") if "frame" in st else ms("load") if "load" in st else -1
     line = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}\t{_zt['ip']}\t{mode}\t{_zt['name'][:30]}\t"
             f"lock={ms('lock')}\tresolve={ms('resolve')}\tcache={_zt['cache']}\tload={ms('load')}\t"
-            f"frame={ms('frame')}\tok={int(bool(ok))}\n")
+            f"frame={ms('frame')}\tok={int(bool(ok))}" + (f"\tnote={note}" if note else "") + "\n")
     try:
         with open(ZAP_LOG, "a", encoding="utf-8") as f:
             f.write(line)
@@ -488,7 +546,7 @@ def zap_end(ok, mode):
             open(ZAP_LOG, "w", encoding="utf-8").write("\n".join(lines) + "\n")
     except Exception:
         pass
-    if mode == "zap" and _zt["name"]:
+    if mode == "zap" and _zt["name"] and not note:
         log_action(_zt["ip"] or "127.0.0.1", f"kanal {_zt['name']} ({total} ms)" + ("" if ok else " (BAŞARISIZ)"))
 
 
@@ -583,7 +641,7 @@ def _mpv_start(my):
         return False
     _split["busy"] = True
     try:
-        for k in range(150):         # up to ~15 s for the first frame, polled every 0.1 s
+        for k in range(int(FRAME_WAIT_S / 0.1)):   # no first frame within FRAME_WAIT_S -> _apply gives up / retries
             time.sleep(0.1)
             if _gen[0] != my:        # a newer channel request is waiting: let it run now
                 return True
@@ -634,8 +692,13 @@ def seek_live():
     return True
 
 
+FRAME_WAIT_S = 8.0               # first picture must arrive this fast after loadfile, else the zap failed
+
+
 def _apply(change):
-    """Apply a change to _split, start it; if no picture comes, restore the previous state."""
+    """Apply a change to _split, start it. Failure path (watchdog): no first frame within FRAME_WAIT_S ->
+    show 'Kanal açılamadı' and retry ONCE with the master URL (mpv picks a variant), then if still no picture
+    restore the previous channel. The chip never stays on '…' (every exit clears the veil or shows the failure)."""
     old = (_split["mode"], _split["side"], dict(_split["src"]), _split["on"], _split.get("audio"))
     g0 = _gen[0]
     change()
@@ -645,11 +708,19 @@ def _apply(change):
         return True
     if _gen[0] != g0:                # a newer press is already queued: it decides, no retry/restore here
         return False
-    _vcache.clear()                  # maybe a stale cached variant (rotated token): retry once with fresh ones
-    if mpv_start():
+    zap_fail_chip()
+    _vcache.clear()                  # stale cached variant (rotated token) or hung CDN: retry with the master URL
+    _direct[0] = True
+    try:
+        ok2 = mpv_start()
+    finally:
+        _direct[0] = False
+    if ok2:
         _split["on"] = True
         _split["err"] = None
         return True
+    if _gen[0] != g0:
+        return False
     _split["mode"], _split["side"], _split["src"], was_on = old[0], old[1], old[2], old[3]
     _split["audio"] = old[4]
     _split["err"] = "Kanal açılamadı (yayın kaynağı cevap vermiyor)"
@@ -659,7 +730,24 @@ def _apply(change):
     else:
         _split["on"] = False
         mpv_stop()
+    toast(t("zap_fail"), 3000)       # previous picture (or Android) + 3 s note; the veil is already gone
+    _overlay_safe()
     return False
+
+
+def zap_fail_chip():
+    """Show the failure in the corner chip (replaces the '…' loading chip) for the retry."""
+    with _ui_lock:
+        _ui.update(mode="veil", until=time.time() + 20)
+    toast(t("zap_fail"), 3000)
+    _overlay_safe()
+
+
+def _overlay_safe():
+    try:
+        _overlay(_vol_ui["base"])
+    except Exception as e:
+        print("overlay:", e, flush=True)
 
 
 def run_latest(fn):
@@ -676,17 +764,22 @@ def run_latest(fn):
 def _run_latest_locked(my, fn, mode):
     with _split["lock"]:
         if my != _gen[0]:
+            if mode == "zap":
+                zap_end(False, "zap", note="superseded")      # every zap leaves a line, even when replaced
             return True
         zs("lock")
         ok = False
         try:
             ok = fn()
             return ok
+        except Exception as e:
+            print("zap error:", e, flush=True)
+            return False
         finally:
             if my == _gen[0]:            # nothing newer is queued: targets are settled
                 _want["left"] = _want["right"] = None
-            if mode == "zap" and my == _gen[0]:
-                zap_end(ok, "zap")
+            if mode == "zap":
+                zap_end(ok, "zap", note="" if my == _gen[0] else "superseded")
 
 
 _want = {"left": None, "right": None}   # channel index a pending request is heading to (for fast ▲▲▲)
@@ -859,8 +952,8 @@ def toast_any(text, ms=4000):
     """Short message whether live TV is up (corner toast over mpv) or Android is in front (asistan bar)."""
     toast(text, ms)
     if _split["on"]:
-        if _ui.get("mode") == "list":
-            ui_list_draw()
+        if _ui.get("mode") in ("list", "opts"):
+            ui_compose()
         else:
             ui_banner(ms)
     else:                                # asistan bar goes through adb: never block the HTTP thread on it
@@ -1788,6 +1881,8 @@ def _playing_idx():
 
 
 def ui_banner(ms=2000):
+    if _ui.get("mode") in ("list", "opts"):      # a panel is open: keep it, just redraw
+        ui_compose(); return
     try:
         chs = channels(); i = _playing_idx()
         if not chs or i is None:
@@ -1943,9 +2038,14 @@ def _guide_elems(cid, name):
 
 
 def ui_list_draw():
+    if channels():
+        ui_compose()
+
+
+def _list_elems(guide=True):
     chs = channels()
     if not chs:
-        return
+        return []
     tab = cur_tab(); v = view_idx(); favset = favs(); foc = _ui.get("focus", "rows")
     n = len(v)
     cur = min(_ui.get("cur", 0), max(0, n - 1)); _ui["cur"] = cur
@@ -2007,9 +2107,9 @@ def ui_list_draw():
         L.append(_text(LX + LW // 2, y0 + rows * ROW_H - 4, "▼", 20, "8C8C8C", an=8))
     hint = {"bar": "hint_bar", "wheel": "hint_wheel", "guide": "hint_guide"}.get(foc, "hint_rows")
     L.append(_text(LX + 28, 976, t(hint), 22, "A0A0A0", an=4))
-    if foc == "guide" and _ui.get("guide") is not None and 0 <= _ui["guide"] < len(chs):
+    if guide and foc == "guide" and _ui.get("guide") is not None and 0 <= _ui["guide"] < len(chs):
         L += _guide_elems(chan_id(chs[_ui["guide"]][0]), _disp(chs[_ui["guide"]][0]))
-    _overlay(L)
+    return L
 
 
 def _toggle_sort():
@@ -2019,20 +2119,34 @@ def _toggle_sort():
     v = view_idx(); _ui["cur"] = v.index(keep) if keep in v else 0
 
 
+def _playing_pos():
+    """Position of the channel on screen inside the current list view (0 when it is not in this view)."""
+    i = _playing_idx(); chs = channels(); v = view_idx()
+    if i is None or not chs or (i % len(chs)) not in v:
+        return 0
+    return v.index(i % len(chs))
+
+
+def _tab_go(tab):
+    """Change tab: restore the row you were on in that tab, else the playing channel (or the top)."""
+    _ui["tab"] = tab; _ui["bsel"] = tab; _ui["q"] = _ui.get("q", "") if tab == "search" else ""
+    _ui["cur"] = _ui.get("rowcur", {}).get(tab, _playing_pos() if tab == _ui.get("tab") else 0)
+
+
 def ui_list_open():
-    i = _playing_idx(); chs = channels()
+    """Opens on the playing channel; the last tab is remembered."""
+    tabs = tabs_now()
+    tab = _ui.get("tab", "all") if _ui.get("tab", "all") in tabs else "all"
     with _ui_lock:
-        _ui.update(mode="list", tab="all", bsel="all", focus="rows", until=time.time() + 6, q="", guide=None)
-    v = view_idx()
-    pos = v.index(i % len(chs)) if (i is not None and chs and (i % len(chs)) in v) else 0
-    _ui["cur"] = pos
+        _ui.update(mode="list", tab=tab, bsel=tab, focus="rows", until=time.time() + 6, guide=None)
+    _ui["cur"] = _playing_pos()
     ui_list_draw()
 
 
 def ui_tab_step(step):
     tabs = tabs_now(); k = cur_tab()
-    _ui.update(tab=tabs[(tabs.index(k) + step) % len(tabs)], cur=0, until=time.time() + 6)
-    _ui["bsel"] = _ui["tab"]
+    _tab_go(tabs[(tabs.index(k) + step) % len(tabs)])
+    _ui["until"] = time.time() + 6
     ui_list_draw()
 
 
@@ -2081,16 +2195,17 @@ def list_key(k, ip=""):
         if k in ("left", "right"):
             nb = max(0, min(len(bar) - 1, bi + (1 if k == "right" else -1)))
             _ui["bsel"] = bar[nb]
-            if bar[nb] != "sort":
-                _ui.update(tab=bar[nb], cur=0)
+            if bar[nb] != "sort":                  # the list changes live with the tab
+                _tab_go(bar[nb])
         elif k in ("ok", "play", "down"):
             b = bar[bi]
             if b == "sort" and k != "down":
                 _toggle_sort()
             else:
                 if b != "sort":
-                    _ui.update(tab=b, cur=0)
+                    _tab_go(b)
                 _ui["focus"] = "wheel" if cur_tab() == "search" else "rows"
+                _ui["cur"] = _ui.get("rowcur", {}).get(cur_tab(), _ui.get("cur", 0))
         ui_list_draw(); return True
     if foc == "wheel":
         if k in ("up", "down"):
@@ -2106,6 +2221,10 @@ def list_key(k, ip=""):
             _ui["focus"] = "rows"; _ui["cur"] = 0
         ui_list_draw(); return True
     # rows
+    if k == "left":                                  # any row: straight to the tab bar (no scrolling up)
+        _ui.setdefault("rowcur", {})[tab] = cur
+        _ui["focus"] = "bar"; _ui["bsel"] = tab
+        ui_list_draw(); return True
     if k in ("up", "down", "pgup", "pgdn"):
         step = {"up": -1, "down": 1, "pgup": -10, "pgdn": 10}[k]
         if k == "up" and cur == 0:
@@ -2160,6 +2279,315 @@ def ui_list_move(step):
 
 def ui_list_group(step):
     ui_tab_step(step)
+
+
+# ---- Options menu (MENU key, live TV only): TV-style panel on the right. Context = highlighted channel (list),
+# playing channel (watching) or programme (guide). Layers: main -> settings / recordings -> recording actions.
+OPT_X, OPT_Y, OPT_W = 1380, 60, 480
+OPT_ROW, OPT_TOP, OPT_SHOW = 72, 152, 10
+_opt = {"page": None, "sel": 0, "stack": [], "under": None, "ctx": None}
+_recplay = {"prev": None}            # channel index to return to after a recording was played from the panel
+
+
+def sett(key, default=False):
+    return bool(sched_store().d.get(key, default))
+
+
+def set_sett(key, val):
+    st = sched_store(); st.d[key] = val; st.save()
+
+
+def set_lang(v):
+    """Language switch: the server strings and the page (TV_LANG) follow at once; /etc/tv/env keeps it."""
+    global LANG
+    LANG = v if v in ("en", "tr") else "en"
+    try:
+        lines = open("/etc/tv/env", encoding="utf-8").read().splitlines()
+        out = [("LANG=" + LANG) if x.startswith("LANG=") else x for x in lines]
+        if not any(x.startswith("LANG=") for x in lines):
+            out.append("LANG=" + LANG)
+        open("/etc/tv/env.new", "w", encoding="utf-8").write("\n".join(out) + "\n")
+        os.replace("/etc/tv/env.new", "/etc/tv/env")
+    except Exception:
+        pass
+
+
+def _cut(s, n):
+    s = str(s)
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def sleep_value():
+    left = _sched["sleep"].left(time.time())
+    return f"{-(-left // 60)} dk" if left else t("sleep_none")
+
+
+def _chan_by_i(i):
+    chs = channels()
+    return chs[i % len(chs)] if chs else ("", "")
+
+
+def _split_side_other():
+    return "right" if (_split.get("audio") or _split["side"]) == "left" else "left"
+
+
+def _rec_files():
+    return sched_list().get("files", [])
+
+
+def opt_items():
+    """(key, label, value) rows of the current options page."""
+    p, ctx = _opt["page"], _opt["ctx"] or {}
+    if p == "settings":
+        return [("auto", t("o_auto"), t("on") if sett("auto") else t("off")),
+                ("favonly", t("o_favonly"), t("on") if sett("favonly") else t("off")),
+                ("lang", t("o_lang"), LANG.upper()),
+                ("reload", t("o_reload"), "")]
+    if p == "recs":
+        fs = _rec_files()
+        if not fs:
+            return [("none", t("rec_none"), "")]
+        return [("recfile:" + f["name"], _cut(f["name"], 19), f"{f['mb']} MB") for f in fs]
+    if p == "rec":
+        return [("play", t("o_play"), ""), ("del", t("o_del"), "")]
+    cid_name = _chan_by_i(ctx.get("i", 0))[0]
+    cid = chan_id(cid_name) if cid_name else ""
+    common = [("sleep", t("o_sleep"), sleep_value()), ("recs", t("o_recs"), ""), ("settings", t("o_settings"), "")]
+    if ctx.get("kind") == "guide":
+        rows = guide_rows(cid)
+        j = ctx.get("j", 0)
+        r = rows[j] if 0 <= j < len(rows) else None
+        items = []
+        if r and r[0] > time.time():
+            st = sched_store()
+            rem_on = tvsched.rem_id(cid, r[0]) in {x["id"] for x in st.d["reminders"]}
+            rec_on = tvsched.rec_id(cid, r[0]) in {x["id"] for x in st.d["recordings"]}
+            items = [("rem", t("o_rem"), t("on") if rem_on else ""), ("rec", t("o_rec"), t("on") if rec_on else "")]
+        return items + [("goto", t("o_goto"), _cut(cid_name, 14))] + common
+    fav = cid in favs()
+    items = [("fav", t("o_fav_del") if fav else t("o_fav_add"), ""), ("guide", t("o_guide"), ""),
+             ("list", t("o_list"), ""),
+             ("split", t("o_split_off") if _split["mode"] == "split" else t("o_split"), "")]
+    if _split["on"] and _split["mode"] == "split":
+        items.append(("audio", t("o_audio"), t("snd_left") if (_split.get("audio") or _split["side"]) == "left" else t("snd_right")))
+    return items + common
+
+
+def _opts_elems():
+    items = opt_items(); n = len(items)
+    sel = max(0, min(_opt["sel"], n - 1)) if n else 0
+    shown = min(n, OPT_SHOW)
+    top = max(0, min(sel - shown // 2, n - shown))
+    h = OPT_TOP + 90 + shown * OPT_ROW
+    title = {"settings": t("o_settings_title"), "recs": t("rec_title"), "rec": _cut(_opt["ctx"].get("file", ""), 20)}.get(_opt["page"], t("o_title"))
+    L = [_rect(OPT_X, OPT_Y, OPT_W, h - OPT_Y, PANEL, 0x14, 26),
+         _text(OPT_X + 32, OPT_Y + 24, _ass(title), 32, "FFFFFF", True)]
+    for k in range(shown):
+        j = top + k; key, label, value = items[j]; y = OPT_TOP + k * OPT_ROW
+        on = j == sel
+        if on:
+            L.append(_rect(OPT_X + 14, y - 4, OPT_W - 28, OPT_ROW - 12, ACCENT, 0x00, 14))
+        L.append(_text(OPT_X + 36, y + 22, _ass(_cut(label, 20 if value else 26)), 28, "FFFFFF", on, an=4))
+        if value:
+            L.append(_text(OPT_X + OPT_W - 36, y + 22, _ass(_cut(value, 9)), 24, "FFFFFF" if on else "C8C8C8", on, an=6))
+    if top > 0:
+        L.append(_text(OPT_X + OPT_W // 2, OPT_TOP - 12, "▲", 20, "8C8C8C", an=8))
+    if top + shown < n:
+        L.append(_text(OPT_X + OPT_W // 2, OPT_TOP + shown * OPT_ROW - 6, "▼", 20, "8C8C8C", an=8))
+    L.append(_text(OPT_X + 32, h - 40, t("hint_opts"), 20, "A0A0A0", an=1))
+    return L
+
+
+def ui_compose():
+    """One overlay for everything that is open: the channel list (+ guide) and/or the options panel."""
+    L = []
+    if _ui["mode"] == "list" or (_ui["mode"] == "opts" and _opt["under"] == "list"):
+        L += _list_elems(guide=_ui["mode"] == "list")
+    if _ui["mode"] == "opts":
+        L += _opts_elems()
+    _overlay(L)
+
+
+def _opt_open(page, ctx=None):
+    _opt.update(page=page, ctx=ctx or _opt.get("ctx") or {})
+    _ui.update(mode="opts", until=time.time() + 3600)
+    ui_compose()
+
+
+def menu_toggle(ip=""):
+    """MENU key: open the options panel for what is on screen; pressed again it closes."""
+    chs = channels()
+    if not chs or not _split["on"]:
+        return False
+    if _ui.get("mode") == "opts":
+        return menu_close()
+    if _ui.get("mode") == "list":
+        under = "list"
+        if _ui.get("focus") == "guide" and _ui.get("guide") is not None:
+            ctx = {"kind": "guide", "i": _ui["guide"], "j": _ui.get("gs", 0) + _ui.get("gc", 0)}
+        else:
+            v = view_idx(); cur = min(_ui.get("cur", 0), max(0, len(v) - 1))
+            ctx = {"kind": "chan", "i": v[cur] if v else (_playing_idx() or 0) % len(chs)}
+    else:
+        under = None
+        i = _playing_idx()
+        ctx = {"kind": "chan", "i": (i % len(chs)) if i is not None else 0}
+    _opt.update(under=under, stack=[], ctx=ctx, sel=0)
+    _opt_open("main", ctx)
+    log_action(ip, "seçenekler açıldı")
+    return True
+
+
+def menu_close():
+    _opt.update(page=None, stack=[], under=_opt.get("under"))
+    if _opt.get("under") == "list":
+        _ui.update(mode="list", until=time.time() + 6)
+        ui_compose()
+    else:
+        ui_hide()
+    return True
+
+
+def _opt_push(page, ctx=None):
+    _opt["stack"].append((_opt["page"], _opt["sel"], _opt.get("ctx")))
+    _opt["sel"] = 0
+    if ctx is not None:
+        _opt["ctx"] = ctx
+    _opt_open(page)
+
+
+def _opt_back():
+    if _opt["stack"]:
+        p, sel, ctx = _opt["stack"].pop()
+        _opt.update(page=p, sel=sel, ctx=ctx)
+        _opt_open(p)
+        return True
+    return menu_close()
+
+
+def opt_activate(key, ip=""):
+    ctx = _opt["ctx"] or {}
+    chs = channels()
+    if key == "none":
+        return True
+    if key.startswith("recfile:"):
+        name = key[8:]
+        _opt_push("rec", {"file": name, "kind": "rec"})
+        return True
+    if key == "fav":
+        i = ctx.get("i", 0); name = chs[i % len(chs)][0]
+        on = fav_toggle(chan_id(name))
+        toast(t("fav_on") if on else t("fav_off"), 2000)
+        log_action(ip, ("⭐ favori: " if on else "favoriden çıkarıldı: ") + name)
+        _opt_open(_opt["page"])
+        return True
+    if key == "guide":
+        i = ctx.get("i", 0)
+        _opt.update(page=None, stack=[])
+        _ui["mode"] = "list"
+        _ui["focus"] = "rows"
+        ui_list_open()
+        v = view_idx()
+        if i % len(chs) in v:
+            _ui["cur"] = v.index(i % len(chs))
+        _ui["guide"] = i % len(chs); _ui["gs"] = 0; _ui["gc"] = 0; _ui["focus"] = "guide"
+        ui_list_draw()
+        return True
+    if key == "list":
+        _opt.update(page=None, stack=[])
+        ui_list_open()
+        return True
+    if key == "split":
+        _opt.update(page=None, stack=[])
+        ui_hide()
+        if _split["mode"] == "split":
+            return split_off(to_single=True)
+        return split_on()
+    if key == "audio":
+        split_focus(_split_side_other())
+        _opt_open(_opt["page"])
+        return True
+    if key == "sleep":
+        sleep_cycle(ip)
+        _opt_open(_opt["page"])
+        return True
+    if key == "recs":
+        _opt_push("recs", {"kind": "recs"})
+        return True
+    if key == "settings":
+        _opt_push("settings", {"kind": "settings"})
+        return True
+    if key in ("rem", "rec"):
+        guide_mark("rem" if key == "rem" else "rec", ip)
+        _opt_open(_opt["page"]) if _opt["page"] else None
+        return True
+    if key == "goto":
+        _opt.update(page=None, stack=[]); ui_hide()
+        return zap_to(ctx.get("i", 0), "menu")
+    if key == "auto":
+        set_sett("auto", not sett("auto")); _opt_open(_opt["page"]); return True
+    if key == "favonly":
+        set_sett("favonly", not sett("favonly")); _opt_open(_opt["page"]); return True
+    if key == "lang":
+        set_lang("tr" if LANG == "en" else "en"); _opt_open(_opt["page"]); return True
+    if key == "reload":
+        _chcache["key"] = None
+        channels()
+        toast(t("reloaded"), 2000)
+        _opt_open(_opt["page"])
+        return True
+    if key == "play":
+        p = tvsched.rec_playable(ctx.get("file", ""))
+        if not p:
+            return False
+        _recplay["prev"] = _playing_idx()
+        menu_close()
+        toast(t("rec_playing"), 2500)
+        log_action(ip, "kayıt oynatıldı: " + os.path.basename(p)[:60])
+        return watch_single(("url", p))
+    if key == "del":
+        p = tvsched.rec_playable(ctx.get("file", ""))
+        if p:
+            os.remove(p)
+            log_action(ip, "kayıt silindi: " + os.path.basename(p)[:60])
+        toast(t("rec_deleted"), 2000)
+        _opt["stack"] = [x for x in _opt["stack"] if x[0] != "rec"]
+        _opt_back()
+        return True
+    return False
+
+
+def opt_key(k, ip=""):
+    """Keys while the options panel is open. Back/left = one level up, OK/right = choose."""
+    items = opt_items(); n = len(items)
+    _ui["until"] = time.time() + 3600
+    if k == "back" or k == "left":
+        _opt_back() if k == "back" or _opt["stack"] else menu_close()
+        return True
+    if k in ("up", "down") and n:
+        _opt["sel"] = (_opt["sel"] + (-1 if k == "up" else 1)) % n
+        _opt_open(_opt["page"])
+        return True
+    if k in ("ok", "play", "right") and n:
+        key = items[max(0, min(_opt["sel"], n - 1))][0]
+        return opt_activate(key, ip)
+    return True
+
+
+def step_idx(i, step):
+    """Next/previous channel; with 'Sadece favorilerde gezin' only favourites are visited."""
+    chs = channels(); n = len(chs)
+    if not n:
+        return i
+    f = favs()
+    if not sett("favonly") or not any(chan_id(c[0]) in f for c in chs):
+        return (i + step) % n
+    j = i
+    for _ in range(n):
+        j = (j + step) % n
+        if chan_id(chs[j][0]) in f:
+            return j
+    return i
 
 
 def prefetch_neighbours(i):
@@ -2872,11 +3300,8 @@ def _remote_bridge_loop():
                     _mirror_key(_mirror["ui"], ecodes.EV_KEY, ev.code, ev.value)   # Back/Home/voice -> Android
                     continue
                 if ev.code == _MENU_CODE and _split["on"]:
-                    if ev.value == 1:
-                        hold_t0["menu"] = now
-                    elif ev.value == 0:
-                        held = now - hold_t0.get("menu", now)
-                        pool.submit(_bridge_post, "/sleep/cycle" if held >= 1.2 else "/fav/cur")
+                    if ev.value == 0:
+                        pool.submit(_bridge_post, "/menu")      # options panel (short press)
                     continue
                 if ev.code in _OK_CODES and _split["on"]:
                     # OK: short = select, held >= 0.8 s = toggle favourite (decided on release)
@@ -3137,6 +3562,11 @@ class H(http.server.BaseHTTPRequestHandler):
                 ok = True; log_action(ip, what)
         if handled:
             pass
+        elif len(parts) == 2 and parts[0] == "key" and _split["on"] and _ui["mode"] == "opts" \
+                and parts[1] in ("back", "left", "right", "up", "down", "ok", "play"):
+            ok = opt_key(parts[1], ip)
+        elif parts == ["menu"] or (len(parts) == 2 and parts[0] == "key" and parts[1] == "menu" and _split["on"]):
+            ok = menu_toggle(ip)
         elif len(parts) == 2 and parts[0] == "key" and _split["on"] and _ui["mode"] == "list" \
                 and parts[1] in ("back", "left", "right", "up", "down", "ok", "play"):
             r = list_key(parts[1], ip)
@@ -3148,7 +3578,11 @@ class H(http.server.BaseHTTPRequestHandler):
         elif len(parts) == 2 and parts[0] == "key" and _split["on"] and parts[1] in ("back", "home"):
             ui_hide()
             was = _split["mode"]
-            ok = split_off(to_single=(parts[1] == "back"))
+            if _recplay["prev"] is not None and parts[1] == "back":      # recording was played: back = live again
+                p, _recplay["prev"] = _recplay["prev"], None
+                ok = zap_to(p, "rec-back")
+            else:
+                ok = split_off(to_single=(parts[1] == "back"))
             log_action(ip, f"tuş {parts[1]} → " + ("bölme kapandı" if was == "split" and parts[1] == "back" else "oynatıcı kapandı"))
         elif len(parts) == 2 and parts[0] == "key" and _split["on"] and parts[1] in ("left", "right") \
                 and _split["mode"] == "single" and _ui["mode"] in (None, "banner"):
@@ -3176,7 +3610,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 ui_list_open(); ok = True
             elif parts[1] in ("up", "down") and chs:
                 sd = _split["side"] if _split["mode"] == "split" else "left"
-                i = (base_idx(sd) + (-1 if parts[1] == "up" else 1)) % len(chs)   # ▲ = up the list (towards no. 1), like the phone list
+                i = step_idx(base_idx(sd), -1 if parts[1] == "up" else 1)   # ▲ = up the list (towards no. 1), like the phone list
                 _want[sd] = i; _ch["i"] = i
                 log_action(ip, f"kanal {chs[i][0]}")
                 ok = split_set(("ch", i), sd)
