@@ -374,7 +374,7 @@ def mpv_ensure():
         pass
     cmd = ["mpv", "--msg-level=all=warn,cplayer=info", "--idle=yes", "--force-window=yes", "--fs", "--no-osc",
            "--no-input-default-bindings", "--cursor-autohide=always", "--background-color=#000000",
-           "--hwdec=vaapi-copy", "--vo=gpu", "--gpu-context=wayland", "--ao=pulse", "--cache=yes",
+           "--hwdec=vaapi-copy", "--vo=gpu", "--gpu-context=wayland", "--ao=pulse", "--volume=100", "--volume-max=100", "--cache=yes",
            "--demuxer-readahead-secs=5", "--network-timeout=15",
            # timeshift: keep the last 300 MiB of what was played so the remote can step back (-10 s) in live TV
            "--demuxer-seekable-cache=yes", "--demuxer-max-back-bytes=300MiB",
@@ -1366,6 +1366,42 @@ def ui_volume():
     _overlay(_vol_ui["base"])
 
 
+_vosd = {"lock": threading.Lock(), "want": None, "busy": False}
+
+
+def _vol_show_android(st):
+    v = st["vol"] or 0
+    if st["muted"]:
+        assist("say", "Sessiz", "", ms=2.5); return
+    boost = v > 100
+    sub = "güçlü · yükseltilmiş ses" if boost else ("normal" if v == NORMAL_VOL else "")
+    assist("say", f"Ses %{v}", sub, ms=2.5, color=0xFF8C1A if boost else None)   # orange = boost (Bar.java)
+
+
+def vol_osd():
+    """One volume OSD for every volume change: live TV = mpv overlay, Android = asistan bar (both show % and boost).
+    Never blocks the caller (remote key repeats); only the newest state is shown."""
+    if _split["on"]:
+        ui_volume(); return
+    with _vosd["lock"]:
+        _vosd["want"] = vol_state()
+        if _vosd["busy"]:
+            return
+        _vosd["busy"] = True
+
+    def run():
+        while True:
+            with _vosd["lock"]:
+                st = _vosd["want"]; _vosd["want"] = None
+                if st is None:
+                    _vosd["busy"] = False; return
+            try:
+                _vol_show_android(st)
+            except Exception as e:
+                print("vol osd:", e, flush=True)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def _overlay(lines):
     _vol_ui["base"] = list(lines or [])
     if time.time() < _vol_ui["until"]:
@@ -1687,7 +1723,7 @@ def _assist_ass(state, title, sub):
     return L
 
 
-def assist(state, title, sub="", ms=None):
+def assist(state, title, sub="", ms=None, color=None):
     """state: listen | think | say | err | hide"""
     try:
         if _split["on"]:
@@ -1707,6 +1743,8 @@ def assist(state, title, sub="", ms=None):
                 cmd += f" --es sub {shlex.quote(sub[:160])}"
             if ms:
                 cmd += f" --ei ms {int(ms * 1000)}"
+            if color:
+                cmd += f" --ei color {int(color)}"
         android(cmd + " >/dev/null", timeout=4)
     except Exception as e:
         print("assist:", e, flush=True)
@@ -1797,7 +1835,7 @@ def voice_cmd(text, ip):
         pactl("set-sink-mute", SINK, "1"); return True, "ses kapatıldı"
     m = re.search(r"\bses\w*\b.*?\b(\d{1,3})\b|\b(\d{1,3})\b.*\bses", n)
     if m and not field:
-        pactl("set-sink-mute", SINK, "0"); volume("set", int(m.group(1) or m.group(2)))
+        pactl("set-sink-mute", SINK, "0"); volume("set", int(m.group(1) or m.group(2))); vol_osd()
         return True, f"ses {vol_state()['vol']}%"
     chs = channels()
     try:
@@ -1991,14 +2029,14 @@ def run_decision(d, raw):
     if e in ("ses_ac", "ses_kis"):
         pactl("set-sink-mute", SINK, "0")
         for _ in range(2):
-            volume("up" if e == "ses_ac" else "down")
+            volume("up" if e == "ses_ac" else "down"); vol_osd()
         return True, f"ses {vol_state()['vol']}%"
     if e == "ses_kapat":
         pactl("set-sink-mute", SINK, "1"); return True, "ses kapatıldı"
     if e == "ses_ayarla":
         m = re.search(r"\d{1,3}", _norm(h) + " " + _norm(raw))
         if m:
-            pactl("set-sink-mute", SINK, "0"); volume("set", int(m.group(0)))
+            pactl("set-sink-mute", SINK, "0"); volume("set", int(m.group(0))); vol_osd()
             return True, f"ses {vol_state()['vol']}%"
         return False, "ses seviyesi anlaşılmadı"
     if e == "geri":
@@ -2113,17 +2151,39 @@ def _bridge_post(path):
 _CH_ONLY = set()
 
 
+MIRROR_NAME = "TV Kumanda Tuslar"          # uinput copy of the remote's non-volume keys (tv-voice listens here)
+_mirror = {"ui": None}
+
+
 def _remote_bridge():
+    """Supervisor: the bridge thread must never die silently (a dead bridge leaves the grab/mirror in an unknown state)."""
+    while True:
+        try:
+            _remote_bridge_loop()
+        except Exception as e:
+            print("bridge restarted:", e, flush=True)
+            time.sleep(3)
+
+
+def _remote_bridge_loop():
+    """Physical remote (air mouse): ONE volume for everything.
+    The consumer-control interface (VOLUME/MUTE + Back/Home/voice) is grabbed for good. Its volume keys go only to the
+    host sink (/vol/* = pactl, 0-150 %), so Android's own 0-25 scale never moves. Its other keys are re-emitted on the
+    MIRROR_NAME uinput device so Weston/Android get them as before. While host mpv is up, Back/Home/OK keep the
+    channel/split logic (not forwarded). Other interfaces (arrows, OK on the keyboard) are read, not grabbed, unless a
+    confirmation is open."""
     try:
         import evdev, select
-        from evdev import ecodes
+        from evdev import ecodes, UInput
     except Exception as e:
         print("bridge off (no evdev):", e, flush=True)
-        return
+        time.sleep(3600); return
     codes = {getattr(ecodes, k): v for k, v in _BRIDGE_KEYS.items() if hasattr(ecodes, k)}
+    vol_codes = {getattr(ecodes, k) for k in ("KEY_VOLUMEUP", "KEY_VOLUMEDOWN", "KEY_MUTE") if hasattr(ecodes, k)}
+    rep_ok = {getattr(ecodes, k) for k in ("KEY_VOLUMEUP", "KEY_VOLUMEDOWN") if hasattr(ecodes, k)}
     global _CH_ONLY
     _CH_ONLY = {getattr(ecodes, k) for k in ("KEY_CHANNELUP", "KEY_CHANNELDOWN") if hasattr(ecodes, k)}
-    devs, last_scan, last_sent, grabbed = {}, 0, {}, False
+    devs, cons, last_scan, last_sent, last_vol, grabbed = {}, set(), 0, {}, 0.0, False
     hold_t0 = {}
     pool = ThreadPoolExecutor(max_workers=1)     # keeps key order, never blocks reading
     while True:
@@ -2136,55 +2196,94 @@ def _remote_bridge():
                     d = evdev.InputDevice(path)
                 except Exception:
                     continue
-                if d.name.startswith(REMOTE_MATCH) and not d.name.endswith("Mouse") and ecodes.EV_KEY in d.capabilities():
+                caps = d.capabilities()
+                if d.name.startswith(REMOTE_MATCH) and not d.name.endswith("Mouse") and ecodes.EV_KEY in caps:
                     devs[path] = d
+                    keys_here = set(caps[ecodes.EV_KEY])
+                    if "Consumer" in d.name and vol_codes & keys_here:   # the consumer-control interface (the keyboard one has volume caps too)
+                        try:
+                            if _mirror["ui"] is None:
+                                keys = [c for c in caps[ecodes.EV_KEY] if c not in vol_codes]
+                                _mirror["ui"] = UInput({ecodes.EV_KEY: keys}, name=MIRROR_NAME, vendor=0x1915, product=0x1025)
+                            d.grab()
+                            cons.add(path)
+                            print("remote consumer grabbed:", path, d.name, flush=True)
+                        except Exception as e:
+                            print("remote grab/mirror failed (keys stay with Android):", e, flush=True)
                 else:
                     d.close()
         if not devs:
             time.sleep(5); continue
-        want = bool(_confirm["d"]) and time.time() < _confirm["until"]
-        if want != grabbed:                      # confirmation open: keys go only to us (not Android / mpv)
-            for d in list(devs.values()):
+        confirm = bool(_confirm["d"]) and time.time() < _confirm["until"]
+        if confirm != grabbed:                   # confirmation open: keys of the other interfaces go only to us
+            for path, d in list(devs.items()):
+                if path in cons:
+                    continue
                 try:
-                    d.grab() if want else d.ungrab()
+                    d.grab() if confirm else d.ungrab()
                 except Exception:
                     pass
-            grabbed = want
+            grabbed = confirm
         try:
-            r, _, _ = select.select(list(devs.values()), [], [], 0.3 if grabbed else 1.0)
+            r, _, _ = select.select(list(devs.values()), [], [], 0.3 if confirm else 1.0)
         except Exception:
             r = []
         for d in r:
+            path = d.path
             try:
                 evs = list(d.read())
             except OSError:
-                devs.pop(d.path, None); continue
+                devs.pop(path, None); cons.discard(path); continue
+            is_cons = path in cons
             for ev in evs:
-                if ev.type != ecodes.EV_KEY or ev.value not in (1, 2) or ev.code not in codes:
+                if ev.type != ecodes.EV_KEY or ev.value not in (0, 1, 2):
                     continue
-                path = codes[ev.code]
-                if grabbed:
-                    if ev.value == 1:
-                        pool.submit(_bridge_post, "/key/ok" if path == "/key/ok" else "/key/back")
+                now = time.time()
+                if confirm:
+                    if ev.value == 1 and ev.code in codes and ev.code not in vol_codes:
+                        pool.submit(_bridge_post, "/key/ok" if codes[ev.code] == "/key/ok" else "/key/back")
                     continue
+                if is_cons and ev.code in vol_codes:
+                    # volume is never Android's: host sink only (also while Android is in front)
+                    if ev.value == 1 or (ev.value == 2 and ev.code in rep_ok and now - last_vol >= 0.12):
+                        if ev.code in rep_ok:
+                            last_vol = now
+                        pool.submit(_bridge_post, codes[ev.code])
+                    continue
+                if is_cons and not (_split["on"] and ev.code in codes):
+                    _mirror_key(_mirror["ui"], ecodes.EV_KEY, ev.code, ev.value)   # Back/Home/voice -> Android
+                    continue
+                if ev.code not in codes or ev.value == 0:
+                    continue
+                act = codes[ev.code]
                 if not _split["on"]:
                     # Android has focus and handles every key itself. PageUp/PageDown scroll pages there
                     # (Kerim: they must not jump to live TV); only dedicated CH keys open the channel list.
                     if ev.code in _CH_ONLY and ev.value == 1:
                         pool.submit(_bridge_post, "/tv/open")
                     continue
-                now = time.time()
                 if ev.value == 1:
-                    hold_t0[path] = now
-                if ev.value == 2 and path not in _REPEAT_OK and path not in _REPEAT_STEP:
+                    hold_t0[act] = now
+                if ev.value == 2 and act not in _REPEAT_STEP:
                     continue                        # held OK / Back / Home = one press, never a stream
-                if ev.value == 2 and path in _REPEAT_STEP:
+                if ev.value == 2:
                     # held arrow / page key: 1 step per 0.35 s, then faster after 1.2 s so long lists move quickly
-                    gap = 0.35 if now - hold_t0.get(path, now) < 1.2 else 0.15
-                    if now - last_sent.get(path, 0) < gap:
+                    gap = 0.35 if now - hold_t0.get(act, now) < 1.2 else 0.15
+                    if now - last_sent.get(act, 0) < gap:
                         continue
-                last_sent[path] = now
-                pool.submit(_bridge_post, path)
+                last_sent[act] = now
+                pool.submit(_bridge_post, act)
+        # fds of devices that went away are dropped above; the kernel releases their grabs
+
+
+def _mirror_key(ui, typ, code, value):
+    if ui is None:
+        return
+    try:
+        ui.write(typ, code, value)
+        ui.syn()
+    except Exception as e:
+        print("mirror:", e, flush=True)
 
 
 class H(http.server.BaseHTTPRequestHandler):
@@ -2352,8 +2451,7 @@ class H(http.server.BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[0] == "vol" and parts[1] in ("up", "down", "mute", "normal", "set"):
             v = parse_qs(u.query).get("v", [None])[0]
             volume(parts[1], int(v) if v and v.isdigit() else None)
-            if _split["on"]:
-                ui_volume()
+            vol_osd()
             st = vol_state(); log_action(ip, f"ses {parts[1]} → {st['vol']}%{' (sessiz)' if st['muted'] else ''}")
             return self.send_json(st)
         ok = False

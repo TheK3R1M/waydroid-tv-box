@@ -13,3 +13,4 @@
 - **Display reliability:** `tv-weston-watch` restarts the screen stack when Weston stops scanning out after the TV is switched on (`repaint delay abnormal`), only when nothing plays; `tv-weston.service.d/20-follow.conf` restarts Android after a Weston crash and keeps Weston logs; leaving live TV now sends HOME and verifies the launcher.
 - **Host:** `tv-net-isolate.sh` waits for the xtables lock (no more failures / duplicate ip6tables rules).
 - README English-first.
+- **One volume:** host sink 0-150 % (boost >100, orange OSD) drives Android apps, live TV and the remote volume keys; Android media volume pinned to max.

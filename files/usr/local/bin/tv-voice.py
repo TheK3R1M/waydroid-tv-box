@@ -11,6 +11,7 @@ import evdev
 from evdev import ecodes
 
 REMOTE_MATCH = ("XING WEI 2.4G",)          # remote dongle name prefix (/proc/bus/input/devices)
+MIRROR_NAME = "TV Kumanda Tuslar"          # tv-remote re-emits the remote's voice key here (it grabs the dongle)
 MIC_MATCH = "alsa_input.usb-XING_WEI"       # its mic as a PipeWire/Pulse source (pactl list short sources)
 VOICE_KEYS = {ecodes.KEY_VOICECOMMAND, getattr(ecodes, "KEY_ASSISTANT", -1)}
 PULSE = "unix:/run/tv/pulse/native"
@@ -232,7 +233,7 @@ def main():
                     d = evdev.InputDevice(path)
                 except Exception:
                     continue
-                if d.name.startswith(REMOTE_MATCH) and VOICE_KEYS & set(d.capabilities().get(ecodes.EV_KEY, [])):
+                if d.name == MIRROR_NAME and VOICE_KEYS & set(d.capabilities().get(ecodes.EV_KEY, [])):   # tv-remote mirror (its grab takes the real device)
                     devs[path] = d; print("listening on", path, d.name, flush=True)
                 else:
                     d.close()

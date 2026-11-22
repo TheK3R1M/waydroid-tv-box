@@ -1,0 +1,7 @@
+[Unit]
+Description=TV: pin Android music volume to max (host sink is the only volume)
+After=tv-android.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/tv-vol-pin.sh

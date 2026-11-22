@@ -42,6 +42,8 @@ public class Bar extends BroadcastReceiver {
         String t = i.getStringExtra("text"), s = i.getStringExtra("sub");
         dots.mode = "think".equals(st) ? 1 : "say".equals(st) ? 2 : "err".equals(st) ? 3 : 0;
         title.setText(t == null ? "" : t);
+        int col = i.getIntExtra("color", 0);       // optional title colour (volume boost = orange)
+        title.setTextColor(col != 0 ? (0xFF000000 | col) : Color.WHITE);
         sub.setText(s == null ? "" : s);
         sub.setVisibility(s == null || s.isEmpty() ? View.GONE : View.VISIBLE);
         H.removeCallbacks(HIDE);
