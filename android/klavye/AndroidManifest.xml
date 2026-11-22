@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- TV Klavye: on-screen Turkish keyboard IME + ADBKeyboard-compatible injection. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="org.tvbox.klavye" android:versionCode="5" android:versionName="3.1-B">
+    package="org.tvbox.klavye" android:versionCode="6" android:versionName="3.2-D">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="33" />
     <application android:label="TV Klavye" android:allowBackup="false">
         <service android:name=".KlavyeIME"

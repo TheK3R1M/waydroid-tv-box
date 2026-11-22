@@ -143,3 +143,5 @@ Modüller: `core` (zorunlu), `remote`, `live-tv`, `voice`, `keyboard`, `guard`, 
 doğrulama ve kaldırma adımı var: `bash install.sh --uninstall <modül>`. Ryzen Embedded R2314 üzerinde
 Android TV 13 çalışır; TV 16 açılmaz. Korsan yayın uygulaması kurulmaz. Mimari notlar:
 [docs/00-architecture-tr.md](docs/00-architecture-tr.md).
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed recently.

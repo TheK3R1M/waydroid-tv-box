@@ -138,7 +138,7 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         int p = dp(6);
         root.setPadding(p, p, p, p);
         int sw = getResources().getDisplayMetrics().widthPixels;
-        FrameLayout.LayoutParams rl = new FrameLayout.LayoutParams((int) (sw * 0.74f), ViewGroup.LayoutParams.WRAP_CONTENT);
+        FrameLayout.LayoutParams rl = new FrameLayout.LayoutParams((int) (sw * 0.5f), ViewGroup.LayoutParams.WRAP_CONTENT);
         rl.gravity = Gravity.CENTER_HORIZONTAL;
         frame.addView(root, rl);
         hintLayer = new FrameLayout(this);
@@ -209,44 +209,33 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
         return l;
     }
 
-    /** Layout B (Kerim's pick): compact Turkish Q in the middle + a fixed action column on the right.
-     *  Every row = 12 units of keys + 2.6 units of action key, so the column lines up vertically. */
+    /** Layout D: square 8-column alphabetical grid (short horizontal travel) + right action column.
+     *  Each row = 8 units of keys + 2 units action key so the column lines up. */
     private void buildLayout() {
-        final float A = 2.6f;
+        final float A = 2f;
         rows.clear();
         List<K> sw = new ArrayList<>();
-        for (int i = 0; i < 3; i++) sw.add(new K(i < sugg.size() ? sugg.get(i) : "", "", T_WORD, 4f));
+        for (int i = 0; i < 2; i++) sw.add(new K(i < sugg.size() ? sugg.get(i) : "", "", T_WORD, 4f));
         sw.add(new K("Gizle", "", T_HIDE, A));
         rows.add(sw);
-        List<K> r1, r2, r3;
-        if (symbols) {
-            r1 = keys("1 2 3 4 5 6 7 8 9 0 - _", 1f);
-            r2 = keys("@ # $ % & * ( ) / : ;", 12f / 11);
-            r3 = new ArrayList<>();
-            r3.add(new K("ABC", "", T_SYM, 1.5f));
-            r3.addAll(keys("! ? \" ' + = ~ |", 10.5f / 8));
-        } else {
-            r1 = keys("q w e r t y u \u0131 o p \u011f \u00fc", 1f);
-            r2 = keys("a s d f g h j k l \u015f i", 12f / 11);
-            r3 = new ArrayList<>();
-            r3.add(new K("\u21E7", "", T_SHIFT, 1.5f));
-            r3.addAll(keys("z x c v b n m \u00f6 \u00e7", 10.5f / 9));
+        String[] g = symbols
+                ? new String[]{"1 2 3 4 5 6 7 8", "9 0 - _ / : ; !", "@ # $ % & * ( )", "? \" ' + = ~ | ,"}
+                : new String[]{"a b c \u00e7 d e f g", "\u011f h \u0131 i j k l m", "n o \u00f6 p r s \u015f t", "u \u00fc v y z q w x"};
+        K[] act = {new K("\u232B Sil", "", T_BACK, A), new K("Temizle", "", T_CLEAR, A),
+                new K("Ara \u23CE", "", T_ENTER, A), new K("\uD83C\uDFA4 Ses", "", T_MIC, A)};
+        for (int i = 0; i < 4; i++) {
+            List<K> r = keys(g[i], 1f);
+            r.add(act[i]);
+            rows.add(r);
         }
-        r1.add(new K("\u232B Sil", "", T_BACK, A));
-        r2.add(new K("Temizle", "", T_CLEAR, A));
-        r3.add(new K("Ara \u23CE", "", T_ENTER, A));
-        rows.add(r1);
-        rows.add(r2);
-        rows.add(r3);
-        List<K> r4 = new ArrayList<>();
-        r4.add(new K(symbols ? "ABC" : "123", "", T_SYM, 1.5f));
-        r4.add(new K(",", ",", T_CHAR, 1f));
-        r4.add(new K("Bo\u015fluk", " ", T_SPACE, 5f));
-        r4.add(new K(".", ".", T_CHAR, 1f));
-        r4.add(new K("@", "@", T_CHAR, 1f));
-        r4.add(new K(".com", ".com", T_CHAR, 2.5f));
-        r4.add(new K("\uD83C\uDFA4 Ses", "", T_MIC, A));
-        rows.add(r4);
+        List<K> r5 = new ArrayList<>();
+        r5.add(new K(symbols ? "ABC" : "123", "", T_SYM, 1.5f));
+        r5.add(new K("\u21E7", "", T_SHIFT, 1f));
+        r5.add(new K("Bo\u015fluk", " ", T_SPACE, 3f));
+        r5.add(new K(".", ".", T_CHAR, 1f));
+        r5.add(new K(".com", ".com", T_CHAR, 1.5f));
+        r5.add(new K("@", "@", T_CHAR, A));
+        rows.add(r5);
     }
 
     private void buildKeys() {
@@ -586,11 +575,11 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
     private void refreshWords() {
         if (root == null || symbols) return;
         Predictor pr = pred;
-        List<String> n = pr == null ? new ArrayList<String>() : pr.words(curWord(), prevWord(), 3);
+        List<String> n = pr == null ? new ArrayList<String>() : pr.words(curWord(), prevWord(), 2);
         if (n.equals(sugg)) return;
         sugg = n;
         List<K> sw = rows.get(0);
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 2; i++) {
             K old = sw.get(i);
             K k = new K(i < sugg.size() ? sugg.get(i) : "", "", T_WORD, 1f);
             k.r = old.r;
@@ -631,7 +620,6 @@ public class KlavyeIME extends InputMethodService implements View.OnClickListene
     }
 
     private void showHints(boolean letter) {
-        if (true) { hideHints(); return; }   // layout B: no letter chips (Kerim found them confusing)
         Predictor pr = pred;
         hsel = -1;
         if (!letter || symbols || pr == null) { hideHints(); return; }

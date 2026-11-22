@@ -50,7 +50,7 @@ FILES_remote="usr/local/bin/tv-remote.py usr/local/share/tv-remote/index.html et
  usr/local/bin/tv-remote-restart-when-idle.sh usr/local/bin/tv-adb-lan.sh etc/systemd/system/tv-android.service.d/adb.conf
  usr/local/bin/tv-intent.py usr/local/bin/tv-fix.sh usr/local/bin/tv-why.py usr/local/bin/tv-blackbox.py
  etc/systemd/system/tv-blackbox.service usr/local/bin/tv-hdmi-stream"
-FILES_live-tv="usr/local/bin/tv-channels.py usr/local/bin/tv-channels-extra.py
+FILES_live_tv="usr/local/bin/tv-channels.py usr/local/bin/tv-channels-extra.py
  etc/systemd/system/tv-channels-extra.service etc/systemd/system/tv-channels-extra.timer"
 FILES_voice="usr/local/bin/tv-voice.py usr/local/bin/tv-nlu.py usr/local/bin/tv-understand.py
  etc/systemd/system/tv-voice.service etc/systemd/system/tv-whisper.service"
@@ -122,7 +122,7 @@ kit_check() {  # every file a module needs must exist in the kit before anything
 }
 
 files_of() {  # files_of <module> -> relative paths (wireless extras are added in deploy_list)
-  local v="FILES_${1}"; echo "${!v:-}" | tr -s ' \n' '\n' | grep -v '^$' || true
+  local v="FILES_${1//-/_}"; echo "${!v:-}" | tr -s ' \n' '\n' | grep -v '^$' || true
 }
 
 # ---------- preflight ----------
