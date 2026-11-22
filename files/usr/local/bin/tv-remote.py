@@ -2,7 +2,7 @@
 """Spike TV web remote: http://<spike>:8090 and https://__TV_HOSTNAME__ (LAN-only, whitelisted actions,
 no shell injection). v16: phone mouse (touchpad + gyro), HTTPS (gyro needs a secure page), latest-wins channel
 changes, cached HLS variants, instant split side switch."""
-import base64, http.server, ipaddress, json, os, re, socket, ssl, subprocess, threading, time, urllib.request
+import base64, http.server, ipaddress, json, os, re, socket, ssl, subprocess, sys, threading, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -35,11 +35,35 @@ T = {
     "en": {"seek_behind": "{n} s behind live", "seek_step": "{n} s", "live": "Live",
            "list_title": "Channels", "list_hint": "▲▼ select   OK watch   ◀ / Back close",
            "side_left": "LEFT SCREEN", "side_right": "RIGHT SCREEN", "watching": "● watching",
-           "tag_left": "LEFT · ", "tag_right": "RIGHT · ", "now": "Now", "next": "Next", "no_guide": "no guide"},
+           "tag_left": "LEFT · ", "tag_right": "RIGHT · ", "now": "Now", "next": "Next", "no_guide": "no guide",
+           "tab_fav": "★ Favorites", "tab_all": "All", "tab_search": "Search", "sort_num": "Sort: No.", "sort_az": "Sort: A-Z",
+           "count": "{n} channels", "search_q": "Search: {q}", "search_hint": "Pick letters with ► (◀ deletes)",
+           "search_count": "{n} results", "search_none": "No results", "fav_empty": "No favourites yet - press MENU to add",
+           "hint_bar": "◀▶ tab   OK open   ▼ into list   Back close", "hint_rows": "▲▼ select   OK watch   ► guide   MENU ★   Back close",
+           "hint_wheel": "▲▼ letter   ► add   ◀ delete   OK results   Back close", "hint_guide": "▲▼ scroll   ◀ / Back close",
+           "guide_none": "No programme data", "fav_on": "★ Added to favourites", "fav_off": "Removed from favourites",
+           "hint_guide": "▲▼ select  OK remind  MENU record  ◀ / Back close",
+           "rem_on": "⏰ Reminder set: {title}", "rem_off": "Reminder removed", "rec_on": "● Recording set: {title}",
+           "rec_off": "Recording cancelled", "rec_past": "Already on air", "rec_fail": "Could not schedule: {why}",
+           "rem_soon": "Starts in 1 min: {title} ({name})", "rem_start_ok": "Started: {title} · OK to switch",
+           "rem_switch": "Switching to {name}", "sleep_set": "Sleep timer: {n} min", "sleep_off": "Sleep timer off",
+           "sleep_warn": "TV sleeps in 1 min"},
     "tr": {"seek_behind": "Canlıdan -{n} sn", "seek_step": "{n} sn", "live": "Canlı",
            "list_title": "Kanallar", "list_hint": "▲▼ seç     OK izle     ◀ / Geri kapat",
            "side_left": "SOL EKRAN", "side_right": "SAĞ EKRAN", "watching": "● izleniyor",
-           "tag_left": "SOL  ·  ", "tag_right": "SAĞ  ·  ", "now": "Şimdi", "next": "Sonra", "no_guide": "rehber yok"},
+           "tag_left": "SOL  ·  ", "tag_right": "SAĞ  ·  ", "now": "Şimdi", "next": "Sonra", "no_guide": "rehber yok",
+           "tab_fav": "★ Favoriler", "tab_all": "Tümü", "tab_search": "Ara", "sort_num": "Sırala: Numara", "sort_az": "Sırala: A-Z",
+           "count": "{n} kanal", "search_q": "Ara: {q}", "search_hint": "Harfleri ► ile ekleyin, ◀ ile silin",
+           "search_count": "{n} sonuç", "search_none": "Sonuç yok", "fav_empty": "Henüz favori yok — MENU ile ekleyin",
+           "hint_bar": "◀▶ sekme   OK aç   ▼ listeye in   Geri kapat", "hint_rows": "▲▼ seç   OK izle   ► program   MENU ★   Geri kapat",
+           "hint_wheel": "▲▼ harf   ► ekle   ◀ sil   OK sonuçlar   Geri kapat", "hint_guide": "▲▼ kaydır   ◀ / Geri kapat",
+           "guide_none": "Yayın akışı yok", "fav_on": "★ Favorilere eklendi", "fav_off": "Favorilerden çıkarıldı",
+           "hint_guide": "▲▼ seç   OK hatırlat   MENU kaydet   ◀ / Geri kapat",
+           "rem_on": "⏰ Hatırlatıcı kuruldu: {title}", "rem_off": "Hatırlatıcı kaldırıldı", "rec_on": "● Kayıt kuruldu: {title}",
+           "rec_off": "Kayıt iptal edildi", "rec_past": "Yayında veya bitti", "rec_fail": "Kurulamadı: {why}",
+           "rem_soon": "1 dk sonra başlıyor: {title} ({name})", "rem_start_ok": "Başladı: {title} · geçmek için OK",
+           "rem_switch": "{name} kanalına geçiliyor", "sleep_set": "Uyku zamanlayıcısı: {n} dk",
+           "sleep_off": "Uyku zamanlayıcısı kapandı", "sleep_warn": "TV 1 dk sonra uykuya geçecek"},
 }
 
 
@@ -229,6 +253,7 @@ def task_of(pkg):
 # TV build (task surfaces are never offset, everything is drawn at x=0). mpv sits on top of Android in
 # Weston kiosk-shell, decodes with VAAPI and composes two sources side by side. Sound = ACTIVE side only.
 MPV_SOCK = "/run/tv/mpv-split.sock"
+_mp = {}                # last value we set per mpv property (skip unchanged IPC calls)
 _split = {"on": False, "mode": "single", "proc": None, "side": "left",
           "src": {"left": None, "right": None}, "lock": threading.RLock()}
 
@@ -254,11 +279,14 @@ VCACHE_TTL = 600
 
 def best_variant(url):
     hit = _vcache.get(url)
+    _zt["cache"] = bool(hit and time.time() - hit[0] < VCACHE_TTL)
     if hit and time.time() - hit[0] < VCACHE_TTL:
         return hit[1]
     r = _best_variant(url)
-    if r:
-        _vcache[url] = (time.time(), r)
+    if r is None:
+        # master did not answer: a stale media playlist beats the master (never cache the master as "media")
+        return hit[1] if hit else url
+    _vcache[url] = (time.time(), r)
     return r
 
 
@@ -270,9 +298,9 @@ def _best_variant(url):
         try:
             # 9 s: the turknet CDN (ATV, A Spor) regularly needs 3-6 s to answer its long DVR playlist; 5 s made
             # ATV fail to open about half the time ("ATV hep bozuk").
-            txt = urllib.request.urlopen(req, timeout=9).read(400000).decode("utf-8", "ignore")
+            txt = urllib.request.urlopen(req, timeout=6).read(400000).decode("utf-8", "ignore")
         except Exception:
-            return None
+            return None                    # unknown (not "use the master"): best_variant decides
         if "#EXT-X-STREAM-INF" not in txt:
             return url
         # best = highest resolution <= 1080p; variants without RESOLUTION (some CDNs) or equal height are ranked
@@ -376,11 +404,13 @@ def mpv_ensure():
            "--no-input-default-bindings", "--cursor-autohide=always", "--background-color=#000000",
            "--hwdec=vaapi-copy", "--vo=gpu", "--gpu-context=wayland", "--ao=pulse", "--volume=100", "--volume-max=100", "--cache=yes",
            "--demuxer-readahead-secs=5", "--network-timeout=15",
+           "--demuxer-lavf-analyzeduration=0.5", "--demuxer-lavf-probesize=500000", "--cache-pause-initial=no",
            # timeshift: keep the last 300 MiB of what was played so the remote can step back (-10 s) in live TV
            "--demuxer-seekable-cache=yes", "--demuxer-max-back-bytes=300MiB",
            f"--input-ipc-server={MPV_SOCK}"]
     _log = open("/var/log/tv-split.log", "ab")
     _split["proc"] = subprocess.Popen(cmd, env=tv_env(), stdout=_log, stderr=subprocess.STDOUT)
+    _mp.clear()                     # new mpv process: nothing is set yet
     for _ in range(40):
         time.sleep(0.15)
         if os.path.exists(MPV_SOCK) and mpv_ipc(["get_property", "idle-active"], 1).get("error") == "success":
@@ -420,6 +450,75 @@ def ticket():
         return _gen[0]
 
 
+# ---- Zap timing (/var/log/tv-zap.log): one line per channel change with the time spent in each stage.
+# press = HTTP/bridge receipt; lock = run_latest got the lock; resolve = variant URL ready (cache hit?);
+# load = loadfile answered; frame = first new picture (estimated-vf-fps). All times in ms from press.
+ZAP_LOG = "/var/log/tv-zap.log"
+_zt = {"press": 0.0, "ip": "", "st": {}, "name": "", "cache": None}
+_zt_lock = threading.Lock()
+_zap_tl = threading.local()             # set by do_POST: zap requests are queued, not run on the HTTP thread
+
+
+def zs(stage, **kw):
+    """Record a stage time (monotonic) for the zap in progress; kw = extra facts (cache, name)."""
+    _zt["st"][stage] = time.monotonic()
+    _zt.update({k: v for k, v in kw.items()})
+
+
+def zap_begin(ip):
+    with _zt_lock:
+        _zt.update(press=time.monotonic(), ip=ip, st={}, name="", cache=None)
+
+
+def zap_end(ok, mode):
+    """Write the stage breakdown; also the old '(N ms)' line on the remote log (same format as before)."""
+    st, p = _zt["st"], _zt["press"]
+    if not p or "lock" not in st:
+        return
+    ms = lambda k: int((st[k] - p) * 1000) if k in st else -1
+    total = ms("frame") if "frame" in st else ms("load") if "load" in st else -1
+    line = (f"{time.strftime('%Y-%m-%d %H:%M:%S')}\t{_zt['ip']}\t{mode}\t{_zt['name'][:30]}\t"
+            f"lock={ms('lock')}\tresolve={ms('resolve')}\tcache={_zt['cache']}\tload={ms('load')}\t"
+            f"frame={ms('frame')}\tok={int(bool(ok))}\n")
+    try:
+        with open(ZAP_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+        if os.path.getsize(ZAP_LOG) > 400_000:
+            lines = open(ZAP_LOG, encoding="utf-8").read().splitlines()[-2000:]
+            open(ZAP_LOG, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+    except Exception:
+        pass
+    if mode == "zap" and _zt["name"]:
+        log_action(_zt["ip"] or "127.0.0.1", f"kanal {_zt['name']} ({total} ms)" + ("" if ok else " (BAŞARISIZ)"))
+
+
+# Zap requests run on ONE background worker with latest-wins: the HTTP/bridge thread returns at once,
+# a newer request replaces a queued one (the older one is never loaded), and a held key can't pile up
+# 0.35 s-spaced blocking HTTP calls behind a 2-3 s stream load.
+_zq = {"fn": None, "cv": threading.Condition()}
+
+
+def _zap_put(fn):
+    with _zq["cv"]:
+        _zq["fn"] = fn
+        _zq["cv"].notify()
+
+
+def _zap_worker():
+    while True:
+        with _zq["cv"]:
+            while _zq["fn"] is None:
+                _zq["cv"].wait()
+            fn, _zq["fn"] = _zq["fn"], None
+        try:
+            fn()
+        except Exception as e:
+            print("zap worker:", e, flush=True)
+
+
+threading.Thread(target=_zap_worker, daemon=True).start()
+
+
 def _veil(src):
     """Zapping: mpv keeps the old frame frozen while the next stream loads, which looks like a hang. Cover the
     picture like a real TV does (dark screen + what is coming) until the first new frame arrives."""
@@ -428,9 +527,9 @@ def _veil(src):
         num = str(src[1] % len(channels()) + 1) if src[0] == "ch" else ""
     except Exception:
         name, num = "", ""
-    L = [_rect(0, 0, 1920, 1080, "000000", 0x00, 0),
-         _text(960, 470, num, 90, ACCENT, True, an=5), _text(960, 580, _ass(name), 56, "FFFFFF", True, an=5),
-         _text(960, 660, "açılıyor…", 30, "9A9A9A", an=5)]
+    # Kerim: the full-screen black "cutscene" felt slow. Keep the picture, show a small corner chip only.
+    L = [_rect(40, 950, 560, 90, PANEL, 0x30, 14), _rect(40, 950, 8, 90, ACCENT, 0x00, 4),
+         _text(70, 966, num, 40, ACCENT, True), _text(150, 968, _ass(name) + "  …", 36, "FFFFFF", True)]
     with _ui_lock:
         _ui.update(mode="veil", until=time.time() + 20)
     _overlay(L)
@@ -455,7 +554,7 @@ def _mpv_start(my):
         files = resolve(_split["src"]["left"])
         if not files:
             return False
-        opts = {"lavfi-complex": ""}
+        lav = ""
     else:
         files = []
         for side in ("left", "right"):
@@ -463,35 +562,37 @@ def _mpv_start(my):
             if not urls:
                 return False
             files += urls
-        opts = {"lavfi-complex": split_graph()}
+        lav = split_graph()
+    zs("resolve", name=src_name(_split["src"]["left"] if _split["mode"] == "single" else _split["src"][_split["side"]]))
     if not mpv_ensure():
         return False
-    # list options must not contain separators -> pass each external file through a separate list option
-    opts = {k: v for k, v in opts.items() if v}
-    if _split["mode"] == "split" and len(files) > 1:
-        mpv_ipc(["set_property", "external-files", files[1:]])
-        mpv_ipc(["set_property", "audio-files", []])
-    else:
-        mpv_ipc(["set_property", "external-files", []])
-        mpv_ipc(["set_property", "audio-files", files[1:]])
-    if not opts.get("lavfi-complex"):
-        mpv_ipc(["set_property", "lavfi-complex", ""])
-    mpv_ipc(["set_property", "af", split_af()])
+    # Only properties that CHANGED are sent: a plain channel-to-channel zap is then one loadfile. Each extra IPC
+    # call waits on mpv's main loop, which is busy right after a load.
+    split2 = _split["mode"] == "split" and len(files) > 1
+    want = {"external-files": files[1:] if split2 else [],
+            "audio-files": [] if split2 else files[1:],
+            "lavfi-complex": lav, "af": split_af()}
+    for prop, val in want.items():
+        if _mp.get(prop) != val:
+            mpv_ipc(["set_property", prop, val], timeout=1)
+            _mp[prop] = val
     r = mpv_ipc({"name": "loadfile", "url": files[0], "flags": "replace", "index": -1,
-                 "options": {k: v for k, v in opts.items() if k not in ("external-files", "audio-files")}}, timeout=5)
+                 "options": {"lavfi-complex": lav} if lav else {}}, timeout=5)
+    zs("load")
     if r.get("error") != "success":
         return False
     _split["busy"] = True
     try:
-        for _ in range(60):          # up to ~15 s for the first frame
-            time.sleep(0.25)
+        for k in range(150):         # up to ~15 s for the first frame, polled every 0.1 s
+            time.sleep(0.1)
             if _gen[0] != my:        # a newer channel request is waiting: let it run now
                 return True
             if not mpv_alive():
                 return False
-            if mpv_ipc(["get_property", "estimated-vf-fps"], 1).get("error") == "success":
+            if mpv_ipc(["get_property", "estimated-vf-fps"], 0.5).get("error") == "success":
+                zs("frame")
                 return True
-            if mpv_ipc(["get_property", "idle-active"], 1).get("data") is True:
+            if k % 10 == 9 and mpv_ipc(["get_property", "idle-active"], 0.5).get("data") is True:
                 return False
         return False
     finally:
@@ -536,11 +637,14 @@ def seek_live():
 def _apply(change):
     """Apply a change to _split, start it; if no picture comes, restore the previous state."""
     old = (_split["mode"], _split["side"], dict(_split["src"]), _split["on"], _split.get("audio"))
+    g0 = _gen[0]
     change()
     if mpv_start():
         _split["on"] = True
         _split["err"] = None
         return True
+    if _gen[0] != g0:                # a newer press is already queued: it decides, no retry/restore here
+        return False
     _vcache.clear()                  # maybe a stale cached variant (rotated token): retry once with fresh ones
     if mpv_start():
         _split["on"] = True
@@ -559,16 +663,30 @@ def _apply(change):
 
 
 def run_latest(fn):
-    """Run a channel/mode change unless a newer one was requested meanwhile (then that one wins)."""
+    """Run a channel/mode change unless a newer one was requested meanwhile (then that one wins).
+    From an HTTP/bridge zap request (_zap_tl.async_) the change is queued on the zap worker and this returns at once;
+    the ticket is taken now, so the newest queued request is the only one that loads."""
     my = ticket()
+    if getattr(_zap_tl, "async_", False):
+        _zap_put(lambda: _run_latest_locked(my, fn, "zap"))
+        return True
+    return _run_latest_locked(my, fn, "ui")
+
+
+def _run_latest_locked(my, fn, mode):
     with _split["lock"]:
         if my != _gen[0]:
             return True
+        zs("lock")
+        ok = False
         try:
-            return fn()
+            ok = fn()
+            return ok
         finally:
             if my == _gen[0]:            # nothing newer is queued: targets are settled
                 _want["left"] = _want["right"] = None
+            if mode == "zap" and my == _gen[0]:
+                zap_end(ok, "zap")
 
 
 _want = {"left": None, "right": None}   # channel index a pending request is heading to (for fast ▲▲▲)
@@ -720,6 +838,211 @@ def _split_watch():
 
 
 threading.Thread(target=_split_watch, daemon=True).start()
+
+
+# ---- Programme scheduling (server/tvsched.py): reminders (OK on a future programme), sleep timer (MENU hold or
+# phone), scheduled recordings (transient systemd units running tv-rec.py, so they survive a tv-remote restart).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tvsched.py sits next to this file
+import tvsched  # noqa: E402
+_sched = {"store": None, "sleep": tvsched.Sleep(), "pend": None}
+SLEEP_STEPS = (30, 60, 90, 120)
+_URL_OK = re.compile(r"^https?://[\w\-.:/?=&%~+@,;]+$")
+
+
+def sched_store():
+    if _sched["store"] is None:
+        _sched["store"] = tvsched.Store()
+    return _sched["store"]
+
+
+def toast_any(text, ms=4000):
+    """Short message whether live TV is up (corner toast over mpv) or Android is in front (asistan bar)."""
+    toast(text, ms)
+    if _split["on"]:
+        if _ui.get("mode") == "list":
+            ui_list_draw()
+        else:
+            ui_banner(ms)
+    else:                                # asistan bar goes through adb: never block the HTTP thread on it
+        threading.Thread(target=assist, args=("say", text, "", ms / 1000), daemon=True).start()
+
+
+def zap_to(idx, why=""):
+    """Switch to channel idx through the normal zap path (latest-wins, timed in tv-zap.log)."""
+    chs = channels()
+    if not chs:
+        return False
+    i = idx % len(chs)
+    zap_begin("127.0.0.1")
+    _zap_tl.async_ = True
+    try:
+        if _split["on"]:
+            _want[_side()] = i; _ch["i"] = i
+            return split_set(("ch", i), _side())
+        _want["left"] = i; _ch["i"] = i
+        return watch_single(("ch", i))
+    finally:
+        _zap_tl.async_ = False
+
+
+def reminder_event(kind, r):
+    title, name = (r.get("title") or "")[:40], (r.get("name") or "")[:24]
+    if kind == "warn":
+        toast_any(t("rem_soon", title=title, name=name), 6000)
+        return
+    idx = chan_index(r["cid"])
+    if idx is None:
+        return
+    if sched_store().d.get("auto"):                  # "otomatik geç" enabled: switch by itself
+        toast_any(t("rem_switch", name=name), 3000)
+        zap_to(idx, "rem")
+        log_action("127.0.0.1", f"hatırlatıcı: {name} · {title} (otomatik geçiş)")
+    else:                                            # otherwise OK switches (live TV only)
+        _sched["pend"] = {"idx": idx, "until": time.time() + 600}
+        toast_any(t("rem_start_ok", title=title, name=name), 8000)
+        log_action("127.0.0.1", f"hatırlatıcı başladı: {name} · {title}")
+
+
+def sleep_now():
+    with _split["lock"]:
+        ui_hide()
+        if _split["on"] or mpv_alive():
+            _split["on"] = False
+            mpv_stop()
+        android("input keyevent 223", timeout=5)      # KEYCODE_SLEEP: screen off, Android stays up
+    log_action("127.0.0.1", "uyku zamanlayıcısı: TV uykuya geçti")
+
+
+def sleep_set(minutes, ip=""):
+    _sched["sleep"].set(minutes, time.time())
+    if minutes:
+        toast_any(t("sleep_set", n=minutes), 4000)
+        log_action(ip, f"uyku zamanlayıcısı {minutes} dk")
+    else:
+        toast_any(t("sleep_off"), 3000)
+        log_action(ip, "uyku zamanlayıcısı kapatıldı")
+
+
+def sleep_cycle(ip=""):
+    """MENU hold on the physical remote: 30 -> 60 -> 90 -> 120 -> off."""
+    left = _sched["sleep"].left(time.time())
+    cur = -(-left // 60) if left else 0
+    nxt = next((m for m in SLEEP_STEPS if m > cur), 0) if left else SLEEP_STEPS[0]
+    sleep_set(nxt, ip)
+    return nxt
+
+
+def _sched_loop():
+    last_rem = 0.0
+    while True:
+        time.sleep(1)
+        try:
+            ev = _sched["sleep"].tick(time.time())
+            if ev == "warn":
+                toast_any(t("sleep_warn"), 8000)
+            elif ev == "off":
+                threading.Thread(target=sleep_now, daemon=True).start()
+            if time.time() - last_rem >= 5:
+                last_rem = time.time()
+                st = sched_store()
+                for kind, r in st.due_reminders(time.time()):
+                    reminder_event(kind, r)
+                st.drop_old(time.time())
+        except Exception as e:
+            print("sched:", e, flush=True)
+
+
+threading.Thread(target=_sched_loop, daemon=True).start()
+
+
+def rec_schedule(x):
+    """Queue a recording as transient systemd units (survives tv-remote restarts). Returns (ok, why)."""
+    now = time.time()
+    a, b = tvsched.rec_window(x["start"], x["stop"])
+    begin = max(a, now + 3)
+    secs = int(b - begin)
+    if b <= now or secs < 20:
+        return False, "geçmiş"
+    idx = chan_index(x["cid"])
+    url = channels()[idx][1] if idx is not None else ""
+    if not _URL_OK.match(url or ""):
+        return False, "kanal adresi yok"
+    os.makedirs(tvsched.REC_DIR, exist_ok=True)
+    unit = tvsched.unit_name(x["id"])
+    cmd = ["systemd-run", f"--unit={unit}", "--collect", f"--description=TV kaydı {x['title'][:40]}"]
+    cmd.append(f"--on-calendar={tvsched.local_cal(begin)}" if begin > now + 5 else "--on-active=3s")
+    cmd += ["/usr/bin/python3", "/usr/local/bin/tv-rec.py", url, os.path.join(tvsched.REC_DIR, x["file"]), str(secs)]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    return r.returncode == 0, (r.stderr or r.stdout).strip()[-160:]
+
+
+def rec_cancel(x):
+    unit = tvsched.unit_name(x["id"])
+    subprocess.run(["systemctl", "stop", unit + ".timer", unit + ".service"], capture_output=True, timeout=30)
+    try:
+        os.remove(os.path.join(tvsched.REC_DIR, x["file"]) + ".part")
+    except OSError:
+        pass
+
+
+def guide_mark(kind, ip=""):
+    """OK (kind 'rem') or MENU (kind 'rec') on the highlighted programme of the on-TV guide."""
+    if _ui.get("guide") is None:
+        return False
+    chs = channels(); v = _ui["guide"]
+    if not chs or v >= len(chs):
+        return False
+    name = chs[v][0]; cid = chan_id(name)
+    rows = guide_rows(cid)
+    j = _ui.get("gs", 0) + _ui.get("gc", 0)
+    if j >= len(rows):
+        return False
+    r = rows[j]; title = str(r[2] or "")[:40]
+    if r[0] <= time.time():
+        toast_any(t("rec_past"), 2000)
+        return True
+    st = sched_store()
+    if kind == "rem":
+        on, _ = st.toggle_reminder(cid, name, r[0], r[1], title, chan_index(cid))
+        toast_any(t("rem_on", title=title) if on else t("rem_off"), 3000)
+    else:
+        on, x, removed = st.toggle_recording(cid, name, r[0], r[1], title)
+        if on:
+            ok, why = rec_schedule(x)
+            if not ok:
+                st.toggle_recording(cid, name, r[0], r[1], title)      # undo the entry
+                toast_any(t("rec_fail", why=why or "?"), 5000)
+                return True
+            toast_any(t("rec_on", title=title), 3000)
+        else:
+            rec_cancel(removed)
+            toast_any(t("rec_off"), 3000)
+    log_action(ip, f"{'hatırlatıcı' if kind == 'rem' else 'kayıt'} {'kuruldu' if on else 'iptal'}: {name} · {title}")
+    ui_list_draw()
+    return True
+
+
+def sched_list():
+    st = sched_store(); now = time.time()
+    recs = []
+    for x in st.d["recordings"]:
+        a, b = tvsched.rec_window(x["start"], x["stop"])
+        if b > now:
+            recs.append({"id": x["id"], "title": x["title"], "name": x["name"], "file": x["file"],
+                         "start": x["start"], "state": "kayıt" if a <= now else "bekliyor"})
+    rems = [{"id": r["id"], "title": r["title"], "name": r["name"], "start": r["start"]}
+            for r in st.d["reminders"] if r["start"] > now - 60]
+    files = []
+    try:
+        for n in os.listdir(tvsched.REC_DIR):
+            if n.endswith(".ts"):
+                q = os.path.join(tvsched.REC_DIR, n)
+                files.append({"name": n, "mb": round(os.path.getsize(q) / 1048576), "mtime": os.path.getmtime(q)})
+    except OSError:
+        pass
+    files.sort(key=lambda f: f["mtime"], reverse=True)
+    return {"auto": bool(st.d.get("auto")), "sleep_left": _sched["sleep"].left(now), "recordings": recs,
+            "reminders": rems, "files": files, "cap_gb": tvsched.REC_CAP // 1024 ** 3}
 
 
 ADB_IME = "org.tvbox.klavye/.KlavyeIME"   # visible TV keyboard with ADBKeyboard-compatible broadcasts
@@ -1310,7 +1633,8 @@ def _ass(t):
 ACCENT = "F26D3D"          # BGR of #3d6df2 (same blue as the phone remote)
 PANEL = "141210"
 FONT = "DejaVu Sans"
-_ui = {"mode": None, "cur": 0, "until": 0.0}
+_ui = {"mode": None, "cur": 0, "until": 0.0, "tab": "all", "bsel": "all", "focus": "rows", "sort": "num",
+       "q": "", "L": 0, "guide": None, "gs": 0}
 _ui_lock = threading.Lock()
 
 
@@ -1404,11 +1728,14 @@ def vol_osd():
 
 def _overlay(lines):
     _vol_ui["base"] = list(lines or [])
+    lines = list(lines or [])
     if time.time() < _vol_ui["until"]:
         try:
-            lines = list(lines or []) + _vol_elems()
+            lines += _vol_elems()
         except Exception as e:
             print("vol ui:", e, flush=True)
+    if _TOAST["shown"] and time.time() < _TOAST["until"]:
+        lines += _toast_elems()
     _overlay_raw(lines)
 
 
@@ -1486,75 +1813,353 @@ def ui_banner(ms=2000):
         print("banner:", e, flush=True)
 
 
-ROWS = 11
+ROW_H = 76                       # row pitch: name line + EPG line fit inside the highlight bar
+ROWS = 8
+ROWS_SEARCH = 6
+GUIDE_ROWS = 13
+LX, LY, LW, LH = 60, 60, 900, 960          # channel panel
+GX, GW = 980, 700                          # programme panel (opens to the right of the list)
+WHEEL = ["A", "B", "C", "Ç", "D", "E", "F", "G", "Ğ", "H", "I", "İ", "J", "K", "L", "M", "N", "O", "Ö", "P",
+         "R", "S", "Ş", "T", "U", "Ü", "V", "Y", "Z"]
+_TOAST = {"text": "", "until": 0.0, "shown": False}
+
+
+def _fold(s):
+    """Search key: Turkish letters folded to ASCII, lower case, spaces removed (I/İ/ı all match i)."""
+    return str(s).translate(TR).lower().replace(" ", "")
+
+
+def tabs_now():
+    """Bar tabs in TV order: favourites, all, one tab per group (order of first appearance), search."""
+    seen = []
+    for _, u in channels():
+        g = _GROUP.get(u, "")
+        if g and ("g:" + g) not in seen:
+            seen.append("g:" + g)
+    return ["fav", "all"] + seen + ["search"]
+
+
+def bar_items():
+    return tabs_now() + ["sort"]
+
+
+def cur_tab():
+    tk = _ui.get("tab", "all")
+    return tk if tk in tabs_now() else "all"
+
+
+def tab_label(k):
+    if k == "sort":
+        return t("sort_az") if _ui.get("sort") == "az" else t("sort_num")
+    if k == "fav":
+        return t("tab_fav")
+    if k == "all":
+        return t("tab_all")
+    if k == "search":
+        return t("tab_search")
+    return str(k[2:])
+
+
+def view_idx():
+    """Channel indices shown in the list for the current tab, search filter and sort."""
+    chs = channels(); tk = cur_tab(); f = favs()
+    if tk == "fav":
+        idx = [i for i, (n, _) in enumerate(chs) if chan_id(n) in f]
+    elif tk == "search":
+        q = _fold(_ui.get("q", ""))
+        idx = [i for i, (n, _) in enumerate(chs) if q and q in _fold(n)]
+    elif tk.startswith("g:"):
+        idx = [i for i, (_, u) in enumerate(chs) if _GROUP.get(u, "") == tk[2:]]
+    else:
+        idx = list(range(len(chs)))
+    if _ui.get("sort") == "az":
+        idx.sort(key=lambda i: _fold(chs[i][0]))
+    return idx
+
+
+def guide_rows(cid):
+    now = time.time()
+    rows = epg_data().get("channels", {}).get(cid) or []
+    return [r for r in rows if r[1] > now - 7200 and r[0] < now + 12 * 3600]
+
+
+def toast(text, ms=1800):
+    _TOAST.update(text=text, until=time.time() + ms / 1000, shown=True)
+
+
+def _toast_elems():
+    txt = _TOAST["text"]
+    w = max(380, int(len(txt) * 19 + 70)); x = 1860 - w          # top-right: clear of the list header
+    return [_rect(x, 36, w, 68, PANEL, 0x10, 34), _text(x + w // 2, 52, _ass(txt), 32, "FFFFFF", True, an=8)]
+
+
+def _bar_w(k):
+    return len(tab_label(k)) * 14 + 36
+
+
+def _bar_window(items, sel, maxw=880):
+    lo = hi = sel; total = _bar_w(items[sel])
+    while True:
+        grew = False
+        if lo > 0 and total + _bar_w(items[lo - 1]) + 12 <= maxw:
+            lo -= 1; total += _bar_w(items[lo]) + 12; grew = True
+        if hi < len(items) - 1 and total + _bar_w(items[hi + 1]) + 12 <= maxw:
+            hi += 1; total += _bar_w(items[hi]) + 12; grew = True
+        if not grew:
+            return lo, hi
+
+
+def _guide_elems(cid, name):
+    rows = guide_rows(cid); now = time.time()
+    G = [_rect(GX, LY, GW, LH, PANEL, 0x1C, 26), _text(GX + 40, 92, _ass(name[:30]), 40, "FFFFFF", True)]
+    if not rows:
+        G.append(_text(GX + GW // 2, 470, t("guide_none"), 36, "A0A0A0", an=8))
+    else:
+        live_i = next((k for k, r in enumerate(rows) if r[0] <= now < r[1]), 0)
+        gs = max(0, min(_ui.get("gs", live_i), len(rows) - GUIDE_ROWS)); _ui["gs"] = gs
+        st = sched_store()
+        rem_ids = {x["id"] for x in st.d["reminders"]}
+        rec_ids = {x["id"] for x in st.d["recordings"]}
+        for k in range(GUIDE_ROWS):
+            j = gs + k
+            if j >= len(rows):
+                break
+            r = rows[j]; y = 170 + k * 56; live = r[0] <= now < r[1]
+            if k == _ui.get("gc", 0) and _ui.get("focus") == "guide":
+                G.append(_rect(GX + 20, y - 10, GW - 40, 48, ACCENT, 0x70, 10))
+            # marks sit on the programme's own line, right edge (reminder = clock, recording = red dot)
+            if tvsched.rem_id(cid, r[0]) in rem_ids:
+                G.append(_text(GX + GW - 50, y + 2, "⏰", 24, "FFFFFF", an=9))
+            if tvsched.rec_id(cid, r[0]) in rec_ids:
+                G.append(_text(GX + GW - 92, y + 2, "●", 26, "3030E6", an=9))
+            G.append(_text(GX + 40, y, f"{epg_hhmm(r[0])}–{epg_hhmm(r[1])}", 24, ACCENT if live else "A0A0A0", live))
+            G.append(_text(GX + 230, y, _ass(str(r[2] or "")[:30]), 26, "FFFFFF" if live else "D0D0D0", live))
+        if gs > 0:
+            G.append(_text(GX + GW - 40, 150, "▲", 22, "8C8C8C", an=9))
+        if gs + GUIDE_ROWS < len(rows):
+            G.append(_text(GX + GW - 40, 1000, "▼", 22, "8C8C8C", an=3))
+    G.append(_text(GX + 40, 976, t("hint_guide"), 22, "A0A0A0", an=4))
+    return G
 
 
 def ui_list_draw():
     chs = channels()
     if not chs:
         return
-    order = ui_order(); favset = favs()
-    n = len(order); cur = _ui["cur"] % n; playing = _playing_idx()
-    top = max(0, min(cur - ROWS // 2, n - ROWS)) if n > ROWS else 0
-    L = [_rect(60, 60, 760, 960, PANEL, 0x1C, 26),
-         _text(110, 92, t("list_title"), 50, "FFFFFF", True),
-         _text(112, 160, t("list_hint"), 26, "A0A0A0")]
-    if _split["mode"] == "split":
-        L.append(_text(780, 100, t("side_left") if _side() == "left" else t("side_right"), 26, ACCENT, True, an=9))
-    y0 = 222
-    for k in range(min(ROWS, n)):
-        j = top + k; y = y0 + k * 70
+    tab = cur_tab(); v = view_idx(); favset = favs(); foc = _ui.get("focus", "rows")
+    n = len(v)
+    cur = min(_ui.get("cur", 0), max(0, n - 1)); _ui["cur"] = cur
+    playing = _playing_idx()
+    bar = bar_items(); bsel = _ui.get("bsel", "all")
+    sel_i = bar.index(bsel) if bsel in bar else 0
+    L = [_rect(LX, LY, LW, LH, PANEL, 0x1C, 26), _text(110, 92, t("list_title"), 46, "FFFFFF", True),
+         _text(LX + LW - 36, 92, t("count", n=n), 24, "A0A0A0", an=9)]
+    # tab bar (LEFT/RIGHT on the bar selects a tab live; OK on Sırala toggles the sort)
+    lo, hi = _bar_window(bar, sel_i)
+    x = LX + 28
+    for j in range(lo, hi + 1):
+        k = bar[j]; w = _bar_w(k); lab = tab_label(k)
+        active = (k == tab) and k != "sort"
+        focused = foc == "bar" and j == sel_i
+        if focused:
+            L.append(_rect(x - 5, 191, w + 10, 62, "FFFFFF", 0x30, 31))
+        L.append(_rect(x, 196, w, 52, ACCENT if active else "3A3632", 0x00 if active else 0x30, 26))
+        L.append(_text(x + w // 2, 222, _ass(lab), 24, "FFFFFF", active or focused, an=5))
+        x += w + 12
+    if tab == "search":
+        q = _ui.get("q", "")
+        L.append(_text(LX + 28, 270, _ass(t("search_q", q=q or "…")), 34, "FFFFFF", True, an=4))
+        Lw = _ui.get("L", 0)
+        for k in range(9):
+            d = k - 4; xc = LX + (LW - 810) // 2 + k * 90 + 45
+            if d == 0:
+                L.append(_rect(xc - 40, 316, 80, 72, ACCENT if foc == "wheel" else "5A4A40", 0x00, 18))
+            L.append(_text(xc, 352, WHEEL[(Lw + d) % len(WHEEL)], 40 if d == 0 else 28,
+                           "FFFFFF" if d == 0 else "8C8C8C", d == 0, an=5))
+        L.append(_text(LX + 28, 412, t("search_count", n=n) if q else t("search_hint"), 22, "A0A0A0", an=4))
+        y0, rows = 446, ROWS_SEARCH
+    else:
+        y0, rows = 300, ROWS
+    if n == 0:
+        msg = t("fav_empty") if tab == "fav" else (t("search_none") if tab == "search" and _ui.get("q") else "")
+        if msg:
+            L.append(_text(LX + LW // 2, y0 + 120, msg, 28, "A0A0A0", an=8))
+    top = max(0, min(cur - rows // 2, n - rows)) if n > rows else 0
+    for k in range(min(rows, max(0, n - top))):
+        j = top + k; y = y0 + k * ROW_H; ci = v[j]; name = chs[ci][0]; cid = chan_id(name)
         sel = j == cur
-        ci = order[j]
+        # bar = 70 px tall, 8 px inside the row pitch on both sides; name line at y+6, EPG line at y+40 (ends y+60)
         if sel:
-            L.append(_rect(84, y - 8, 712, 64, ACCENT, 0x00, 14))
-        L.append(_text(112, y, str(ci + 1), 32, "FFFFFF" if sel else "8C8C8C", sel))
-        L.append(_text(200, y - 2, _disp(chs[ci][0]), 38, "FFFFFF", sel, alpha=0 if sel else 0x20))
-        n_now = epg_now_next(chan_id(chs[ci][0]))[0]
-        if n_now:                                           # now-playing title under the name (EPG)
-            L.append(_text(200, y + 30, f"{epg_hhmm(n_now[0])}  {_disp(n_now[2])}", 20, "A0A0A0", an=7))
-        if chan_id(chs[ci][0]) in favset:
-            L.append(_text(748, y - 2, "★", 34, "FFD54A", True, an=9))
+            L.append(_rect(84, y - 2, 712, 70, ACCENT if foc == "rows" else "3A3632", 0x00 if foc == "rows" else 0x40, 14))
+        L.append(_text(112, y + 35, str(ci + 1), 30, "FFFFFF" if sel else "8C8C8C", sel, an=4))
+        nm = name if len(name) <= 26 else name[:25] + "…"
+        L.append(_text(200, y + 6, _ass(_disp(nm)), 32, "FFFFFF", sel, alpha=0 if sel else 0x20))
+        n_now = epg_now_next(cid)[0]
+        if n_now:
+            L.append(_text(200, y + 42, _ass(f"{epg_hhmm(n_now[0])}  {_disp(str(n_now[2])[:36])}"), 20, "C8C8C8" if sel else "A0A0A0"))
         if playing is not None and ci == playing % len(chs):
-            L.append(_text(776, y, t("watching"), 24, "FFFFFF" if sel else ACCENT, True, an=9))
+            L.append(_text(744, y + 35, t("watching"), 20, "FFFFFF" if sel else ACCENT, True, an=6))
+        if cid in favset:
+            L.append(_text(778, y + 35, "★", 30, "FFD54A", True, an=6))
     if top > 0:
-        L.append(_text(440, 196, "▲", 24, "8C8C8C", an=8))
-    if top + ROWS < n:
-        L.append(_text(440, 1002, "▼", 24, "8C8C8C", an=2))
+        L.append(_text(LX + LW // 2, y0 - 22, "▲", 20, "8C8C8C", an=8))
+    if top + rows < n:
+        L.append(_text(LX + LW // 2, y0 + rows * ROW_H - 4, "▼", 20, "8C8C8C", an=8))
+    hint = {"bar": "hint_bar", "wheel": "hint_wheel", "guide": "hint_guide"}.get(foc, "hint_rows")
+    L.append(_text(LX + 28, 976, t(hint), 22, "A0A0A0", an=4))
+    if foc == "guide" and _ui.get("guide") is not None and 0 <= _ui["guide"] < len(chs):
+        L += _guide_elems(chan_id(chs[_ui["guide"]][0]), _disp(chs[_ui["guide"]][0]))
     _overlay(L)
 
 
+def _toggle_sort():
+    v_old = view_idx(); cur = _ui.get("cur", 0)
+    keep = v_old[cur] if v_old and cur < len(v_old) else None
+    _ui["sort"] = "az" if _ui.get("sort") != "az" else "num"
+    v = view_idx(); _ui["cur"] = v.index(keep) if keep in v else 0
+
+
 def ui_list_open():
-    i = _playing_idx()
-    order = ui_order()
-    pos = order.index(i % len(order)) if (i is not None and i % len(order) in order) else 0
+    i = _playing_idx(); chs = channels()
     with _ui_lock:
-        _ui.update(mode="list", cur=pos, until=time.time() + 6)
+        _ui.update(mode="list", tab="all", bsel="all", focus="rows", until=time.time() + 6, q="", guide=None)
+    v = view_idx()
+    pos = v.index(i % len(chs)) if (i is not None and chs and (i % len(chs)) in v) else 0
+    _ui["cur"] = pos
     ui_list_draw()
+
+
+def ui_tab_step(step):
+    tabs = tabs_now(); k = cur_tab()
+    _ui.update(tab=tabs[(tabs.index(k) + step) % len(tabs)], cur=0, until=time.time() + 6)
+    _ui["bsel"] = _ui["tab"]
+    ui_list_draw()
+
+
+def list_key(k, ip=""):
+    """Keys while the on-TV channel list is open (physical remote or phone pad).
+    Returns True (handled), False, or 'hide' (caller closes the list).
+    Focus: bar (tabs) -> rows (channels) -> guide (programme panel); search tab: wheel (letters) -> rows."""
+    chs = channels()
+    if not chs:
+        return False
+    _ui["until"] = time.time() + 6
+    tab = cur_tab(); bar = bar_items(); foc = _ui.get("focus", "rows")
+    v = view_idx(); n = len(v); cur = min(_ui.get("cur", 0), max(0, n - 1))
+    if k == "back":
+        if foc == "guide":
+            _ui["focus"] = "rows"
+        elif foc == "rows" and tab == "search":
+            _ui["focus"] = "wheel"
+        else:
+            return "hide"
+        ui_list_draw(); return True
+    if foc == "guide":
+        grows = guide_rows(chan_id(chs[_ui["guide"]][0])) if _ui.get("guide") is not None else []
+        gs, gc = _ui.get("gs", 0), _ui.get("gc", 0)
+        vis = min(GUIDE_ROWS, len(grows))
+        maxgs = max(0, len(grows) - GUIDE_ROWS)
+        if k == "left":
+            _ui["focus"] = "rows"
+        elif k == "up":
+            if gc > 0:
+                _ui["gc"] = gc - 1
+            else:
+                _ui["gs"] = max(0, gs - 1)
+        elif k == "down":
+            if gc < vis - 1:
+                _ui["gc"] = gc + 1
+            else:
+                _ui["gs"] = min(maxgs, gs + 1)
+        elif k in ("pgup", "pgdn"):
+            _ui["gs"] = max(0, min(maxgs, gs + (-8 if k == "pgup" else 8)))
+        elif k in ("ok", "play"):
+            guide_mark("rem", ip)
+        ui_list_draw(); return True
+    if foc == "bar":
+        bi = bar.index(_ui.get("bsel", "all")) if _ui.get("bsel") in bar else 0
+        if k in ("left", "right"):
+            nb = max(0, min(len(bar) - 1, bi + (1 if k == "right" else -1)))
+            _ui["bsel"] = bar[nb]
+            if bar[nb] != "sort":
+                _ui.update(tab=bar[nb], cur=0)
+        elif k in ("ok", "play", "down"):
+            b = bar[bi]
+            if b == "sort" and k != "down":
+                _toggle_sort()
+            else:
+                if b != "sort":
+                    _ui.update(tab=b, cur=0)
+                _ui["focus"] = "wheel" if cur_tab() == "search" else "rows"
+        ui_list_draw(); return True
+    if foc == "wheel":
+        if k in ("up", "down"):
+            _ui["L"] = (_ui.get("L", 0) + (-1 if k == "up" else 1)) % len(WHEEL)
+        elif k == "right":
+            _ui["q"] = (_ui.get("q", "") + WHEEL[_ui.get("L", 0)])[:30]; _ui["cur"] = 0
+        elif k == "left":
+            if _ui.get("q"):
+                _ui["q"] = _ui["q"][:-1]; _ui["cur"] = 0
+            else:
+                _ui["focus"] = "bar"
+        elif k in ("ok", "play") and n:
+            _ui["focus"] = "rows"; _ui["cur"] = 0
+        ui_list_draw(); return True
+    # rows
+    if k in ("up", "down", "pgup", "pgdn"):
+        step = {"up": -1, "down": 1, "pgup": -10, "pgdn": 10}[k]
+        if k == "up" and cur == 0:
+            _ui["focus"] = "wheel" if tab == "search" else "bar"
+        else:
+            _ui["cur"] = max(0, min(max(0, n - 1), cur + step))
+    elif k == "right" and n:
+        _ui["guide"] = v[cur]
+        rows = guide_rows(chan_id(chs[v[cur]][0]))
+        now = time.time()
+        _ui["gs"] = max(0, next((j for j, r in enumerate(rows) if r[1] > now), 0))
+        _ui["gc"] = 0
+        _ui["focus"] = "guide"
+    elif k in ("ok", "play") and n:
+        i = v[cur]; sd = _side(); _want[sd] = i; _ch["i"] = i
+        log_action(ip, f"listeden kanal {chs[i][0]}")
+        ok = split_set(("ch", i), sd)
+        ui_banner()
+        return ok
+    ui_list_draw(); return True
+
+
+def fav_current(ip=""):
+    """MENU key (or long OK): toggle the favourite of the highlighted row, else of the channel on screen.
+    In the on-TV guide MENU records the highlighted programme instead."""
+    chs = channels()
+    if not chs:
+        return False
+    if _ui.get("mode") == "list" and _ui.get("focus") == "guide":
+        return guide_mark("rec", ip)
+    v = view_idx() if _ui.get("mode") == "list" else []
+    if v and _ui.get("cur", 0) < len(v):
+        i = v[_ui.get("cur", 0)]
+    elif _split["on"] and _playing_idx() is not None:
+        i = _playing_idx() % len(chs)
+    else:
+        return False
+    name = chs[i][0]; on = fav_toggle(chan_id(name))
+    log_action(ip, ("⭐ favori: " if on else "favoriden çıkarıldı: ") + name)
+    toast(t("fav_on") if on else t("fav_off"))
+    if _ui.get("mode") == "list":
+        ui_list_draw()
+    else:
+        ui_banner()
+    return True
 
 
 def ui_list_move(step):
-    n = len(ui_order()) or 1
-    with _ui_lock:
-        _ui.update(cur=(_ui["cur"] + step) % n, until=time.time() + 6)
-    ui_list_draw()
+    """PageUp/PageDown outside the list-aware path (kept for old call sites)."""
+    list_key("pgdn" if step > 0 else "pgup")
 
 
 def ui_list_group(step):
-    """Jump to the next/previous group start in the on-TV list (order as shown, favourites first)."""
-    chs = channels(); order = ui_order()
-    if not chs or not order:
-        return
-    n = len(order); cur = _ui["cur"] % n
-    grp = [_GROUP.get(chs[j][1], "") for j in order]
-    starts = [j for j in range(n) if j == 0 or grp[j] != grp[j - 1]]
-    if step > 0:
-        target = next((s for s in starts if s > cur), starts[0])
-    else:
-        target = max([s for s in starts if s < cur], default=starts[-1])
-    with _ui_lock:
-        _ui.update(cur=target, until=time.time() + 6)
-    ui_list_draw()
+    ui_tab_step(step)
 
 
 def prefetch_neighbours(i):
@@ -1576,8 +2181,8 @@ def _ui_timer():
         time.sleep(0.5)
         if _ui["mode"] and time.time() > _ui["until"]:
             ui_hide()
-        if _vol_ui["shown"] and time.time() > _vol_ui["until"]:
-            _vol_ui["shown"] = False
+        if (_vol_ui["shown"] and time.time() > _vol_ui["until"]) or (_TOAST["shown"] and time.time() > _TOAST["until"]):
+            _vol_ui["shown"] = False; _TOAST["shown"] = False
             if _split["on"]:
                 _overlay(_vol_ui["base"])
 
@@ -1819,6 +2424,13 @@ def voice_cmd(text, ip):
     n = _norm(raw)
     if not n:
         return False, "boş"
+    if _split["on"] and _ui.get("mode") == "list" and cur_tab() == "search" \
+            and n not in ("geri", "geri dön", "geri git", "vazgeç", "ana ekran"):
+        q = re.sub(r"[^\w ]", "", raw).strip()
+        q = re.sub(r"\s+ara$", "", q, flags=re.I).strip()[:30]
+        _ui.update(q=q, cur=0, focus="rows", until=time.time() + 6)
+        ui_list_draw()
+        return True, f"arama: {q}"
     field = not _split["on"] and field_focused()
     c = VOICE_FIELD_CTRL.get(n) if field else None
     if c == "submit":
@@ -2132,10 +2744,10 @@ _BRIDGE_KEYS = {"KEY_UP": "/key/up", "KEY_DOWN": "/key/down", "KEY_LEFT": "/key/
                 "KEY_ENTER": "/key/ok", "KEY_KPENTER": "/key/ok", "KEY_SELECT": "/key/ok",
                 "KEY_BACK": "/key/back", "KEY_ESC": "/key/back", "KEY_HOMEPAGE": "/key/home",
                 "KEY_PAGEUP": "/ch/prev", "KEY_PAGEDOWN": "/ch/next",          # same direction as the list on screen
-                "KEY_CHANNELUP": "/ch/prev", "KEY_CHANNELDOWN": "/ch/next",
+                "KEY_CHANNELUP": "/ch/prev", "KEY_CHANNELDOWN": "/ch/next", "KEY_COMPOSE": "/fav/cur",
                 "KEY_VOLUMEUP": "/vol/up", "KEY_VOLUMEDOWN": "/vol/down", "KEY_MUTE": "/vol/mute"}
 _REPEAT_OK = {"/vol/up", "/vol/down"}       # held volume repeats freely
-_REPEAT_STEP = {"/key/up", "/key/down", "/key/left", "/key/right", "/ch/next", "/ch/prev"}   # held: 1 step / 0.35 s
+_REPEAT_STEP = {"/key/up", "/key/down", "/key/left", "/key/right", "/ch/next", "/ch/prev"}   # held: 1 step / 0.25 s
 
 
 def _bridge_post(path):
@@ -2149,6 +2761,8 @@ def _bridge_post(path):
 
 
 _CH_ONLY = set()
+_MENU_CODE = -1
+_OK_CODES = set()
 
 
 MIRROR_NAME = "TV Kumanda Tuslar"          # uinput copy of the remote's non-volume keys (tv-voice listens here)
@@ -2183,6 +2797,10 @@ def _remote_bridge_loop():
     rep_ok = {getattr(ecodes, k) for k in ("KEY_VOLUMEUP", "KEY_VOLUMEDOWN") if hasattr(ecodes, k)}
     global _CH_ONLY
     _CH_ONLY = {getattr(ecodes, k) for k in ("KEY_CHANNELUP", "KEY_CHANNELDOWN") if hasattr(ecodes, k)}
+    global _OK_CODES
+    _OK_CODES = {getattr(ecodes, k) for k in ("KEY_ENTER", "KEY_KPENTER", "KEY_SELECT") if hasattr(ecodes, k)}
+    global _MENU_CODE
+    _MENU_CODE = getattr(ecodes, "KEY_COMPOSE", -1)
     devs, cons, last_scan, last_sent, last_vol, grabbed = {}, set(), 0, {}, 0.0, False
     hold_t0 = {}
     pool = ThreadPoolExecutor(max_workers=1)     # keeps key order, never blocks reading
@@ -2253,6 +2871,21 @@ def _remote_bridge_loop():
                 if is_cons and not (_split["on"] and ev.code in codes):
                     _mirror_key(_mirror["ui"], ecodes.EV_KEY, ev.code, ev.value)   # Back/Home/voice -> Android
                     continue
+                if ev.code == _MENU_CODE and _split["on"]:
+                    if ev.value == 1:
+                        hold_t0["menu"] = now
+                    elif ev.value == 0:
+                        held = now - hold_t0.get("menu", now)
+                        pool.submit(_bridge_post, "/sleep/cycle" if held >= 1.2 else "/fav/cur")
+                    continue
+                if ev.code in _OK_CODES and _split["on"]:
+                    # OK: short = select, held >= 0.8 s = toggle favourite (decided on release)
+                    if ev.value == 1:
+                        hold_t0["ok"] = now
+                    elif ev.value == 0:
+                        held = now - hold_t0.get("ok", now)
+                        pool.submit(_bridge_post, "/fav/cur" if held >= 0.8 else "/key/ok")
+                    continue
                 if ev.code not in codes or ev.value == 0:
                     continue
                 act = codes[ev.code]
@@ -2268,7 +2901,7 @@ def _remote_bridge_loop():
                     continue                        # held OK / Back / Home = one press, never a stream
                 if ev.value == 2:
                     # held arrow / page key: 1 step per 0.35 s, then faster after 1.2 s so long lists move quickly
-                    gap = 0.35 if now - hold_t0.get(act, now) < 1.2 else 0.15
+                    gap = 0.25 if now - hold_t0.get(act, now) < 1.2 else 0.12   # zaps are latest-wins: a step never waits
                     if now - last_sent.get(act, 0) < gap:
                         continue
                 last_sent[act] = now
@@ -2350,6 +2983,8 @@ class H(http.server.BaseHTTPRequestHandler):
                                    "last": {"who": _last["who"], "what": _last["what"], "ago": time.time() - _last["t"]}})
         if p == "/channels":
             return self.send_json([c[0] for c in channels()])
+        if p == "/sched/list":
+            return self.send_json(sched_list())
         if p == "/chl":
             f = favs()
             return self.send_json([{"i": i, "id": chan_id(n), "n": n, "g": _GROUP.get(u, ""), "f": chan_id(n) in f}
@@ -2369,6 +3004,7 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send(404)
 
     def do_POST(self):
+        _zap_tl.async_ = False                 # keep-alive: this thread serves many requests
         if not self.allowed() or not self.same_origin():
             self.close_connection = True
             return self.send(403)
@@ -2376,6 +3012,9 @@ class H(http.server.BaseHTTPRequestHandler):
         u = urlparse(self.path)
         parts = u.path.strip("/").split("/")
         ip = self.client_address[0]
+        if parts == ["fav", "cur"]:                 # remote MENU / long OK: favourite of the highlighted channel
+            ok = fav_current(ip)
+            return self.send(200 if ok else 400)
         if len(parts) == 2 and parts[0] == "fav":
             cid = unquote(parts[1])
             if not re.fullmatch(r"\w{1,80}", cid) or chan_index(cid) is None:
@@ -2389,6 +3028,11 @@ class H(http.server.BaseHTTPRequestHandler):
             if i is None:
                 return self.send(404)
             parts = ["ch", str(i)]          # same path as /ch/<index>
+        # channel changes: queued on the zap worker (latest wins), the HTTP/bridge thread answers at once
+        zap = (len(parts) == 2 and parts[0] == "ch" and (parts[1] in ("next", "prev") or parts[1].isdigit())) or               (len(parts) == 2 and parts[0] == "key" and parts[1] in ("up", "down", "ok", "play") and _split["on"])
+        if zap:
+            _zap_tl.async_ = True
+            zap_begin(ip)
         if u.path == "/debug/mark":
             log_action(ip, "KULLANICI SORUN BİLDİRDİ")
             try:
@@ -2440,6 +3084,37 @@ class H(http.server.BaseHTTPRequestHandler):
             txt = seek_rel(sec) if sec in SEEK_STEPS else None
             log_action(ip, f"zaman {sec:+d} sn → {txt or '?'}" + ("" if txt else " (BAŞARISIZ)"))
             return self.send_json({"ok": txt is not None, "text": txt})
+        if len(parts) == 2 and parts[0] == "sleep":          # phone / bridge: 30|60|90|120|0 or cycle
+            if parts[1] == "cycle":
+                sleep_cycle(ip)
+            elif parts[1].isdigit() and int(parts[1]) in (0,) + SLEEP_STEPS:
+                sleep_set(int(parts[1]), ip)
+            else:
+                return self.send(400)
+            return self.send_json({"sleep_left": _sched["sleep"].left(time.time())})
+        if len(parts) == 3 and parts[0] == "sched" and parts[1] == "auto" and parts[2] in ("on", "off"):
+            st = sched_store(); st.d["auto"] = parts[2] == "on"; st.save()
+            log_action(ip, "otomatik geçiş " + ("açıldı" if st.d["auto"] else "kapatıldı"))
+            return self.send_json({"auto": st.d["auto"]})
+        if parts == ["sched", "rec", "cancel"]:              # phone: cancel a scheduled recording
+            rid = parse_qs(u.query).get("id", [""])[0]
+            st = sched_store(); x = st._find(st.d["recordings"], rid)
+            if not x:
+                return self.send(404)
+            st.toggle_recording(x["cid"], x["name"], x["start"], x["stop"], x["title"])   # removes the entry
+            rec_cancel(x)
+            log_action(ip, f"kayıt iptal: {x['name']} · {x['title'][:40]}")
+            return self.send_json({"ok": True})
+        if parts == ["rec", "play"] or parts == ["rec", "del"]:   # phone: play / delete a finished recording
+            p = tvsched.rec_playable(parse_qs(u.query).get("f", [""])[0])
+            if not p:
+                return self.send(404)
+            if parts == ["rec", "del"]:
+                os.remove(p); log_action(ip, "kayıt silindi: " + os.path.basename(p)[:60])
+                return self.send_json({"ok": True})
+            ok = watch_single(("url", p))
+            log_action(ip, "kayıt oynatıldı: " + os.path.basename(p)[:60] + ("" if ok else " (BAŞARISIZ)"))
+            return self.send_json({"ok": bool(ok)})
         if parts == ["live"]:                                 # phone: Canlı
             ok = seek_live()
             log_action(ip, "canlıya dönüldü" + ("" if ok else " (BAŞARISIZ)"))
@@ -2462,9 +3137,14 @@ class H(http.server.BaseHTTPRequestHandler):
                 ok = True; log_action(ip, what)
         if handled:
             pass
-        elif len(parts) == 2 and parts[0] == "key" and _split["on"] and parts[1] == "back" and _ui["mode"] == "list":
-            ui_hide(); ok = True
-            log_action(ip, "kanal listesi kapandı")
+        elif len(parts) == 2 and parts[0] == "key" and _split["on"] and _ui["mode"] == "list" \
+                and parts[1] in ("back", "left", "right", "up", "down", "ok", "play"):
+            r = list_key(parts[1], ip)
+            if r == "hide":
+                ui_hide(); ok = True
+                log_action(ip, "kanal listesi kapandı")
+            else:
+                ok = bool(r)
         elif len(parts) == 2 and parts[0] == "key" and _split["on"] and parts[1] in ("back", "home"):
             ui_hide()
             was = _split["mode"]
@@ -2489,6 +3169,9 @@ class H(http.server.BaseHTTPRequestHandler):
                     ui_banner()
                 else:
                     ui_hide(); ok = True
+            elif parts[1] == "ok" and _sched["pend"] and time.time() < _sched["pend"]["until"]:
+                idx = _sched["pend"]["idx"]; _sched["pend"] = None
+                ok = zap_to(idx, "ok")
             elif parts[1] == "ok":
                 ui_list_open(); ok = True
             elif parts[1] in ("up", "down") and chs:
@@ -2581,8 +3264,8 @@ class H(http.server.BaseHTTPRequestHandler):
             ok = ime_confirm()
             log_action(ip, "yazı gönderdi (onay)" + ("" if ok else " (BAŞARISIZ)"))
         elif len(parts) == 2 and parts[0] == "ch" and parts[1] in ("next", "prev") and _split["on"] and _ui["mode"] == "list":
-            # PageUp / PageDown in the on-TV list = 10 rows (Kerim: long lists)
-            ui_list_move(10 if parts[1] == "next" else -10); ok = True
+            # PageUp / PageDown in the on-TV list = 10 rows (Kerim: long lists); in the guide = 8 lines
+            list_key("pgdn" if parts[1] == "next" else "pgup", ip); ok = True
         elif len(parts) == 2 and parts[0] == "ch":
             chs = channels()
             i = {"next": _ch["i"] + 1, "prev": _ch["i"] - 1}.get(parts[1])
@@ -2602,9 +3285,7 @@ class H(http.server.BaseHTTPRequestHandler):
                     i = base_idx("left") + (1 if parts[1] == "next" else -1)
                 i %= len(chs)
                 _want["left"] = i; _ch["i"] = i
-                t0 = time.time()
                 ok = watch_single(("ch", i))
-                log_action(ip, f"kanal {chs[i][0]} ({(time.time() - t0) * 1000:.0f} ms)" + ("" if ok else " (BAŞARISIZ)"))
         elif parts == ["tv", "open"]:
             ok = tv_open()
             log_action(ip, "canlı TV + kanal listesi açıldı" + ("" if ok else " (BAŞARISIZ)"))

@@ -265,6 +265,11 @@ body.desk #keyhelp{display:block}
     <div class="grid3"><button data-app="youtube">YouTube</button><button data-app="web">Tarayıcı</button><button data-app="tv">Canlı TV</button></div>
     <div class="lbl">Oynatma</div>
     <div class="grid3"><button data-k="rew">⏪ Geri sar</button><button data-k="ff">İleri sar ⏩</button><button data-k="menu">Menü</button></div>
+    <div class="lbl">Uyku zamanlayıcısı <span id="sleepinfo" style="color:var(--acc)"></span></div>
+    <div class="grid3"><button onclick="post('/sleep/30')">30 dk</button><button onclick="post('/sleep/60')">60 dk</button><button onclick="post('/sleep/90')">90 dk</button></div>
+    <div class="grid2" style="margin-top:8px"><button onclick="post('/sleep/120')">120 dk</button><button onclick="post('/sleep/0')">Kapat</button></div>
+    <div class="lbl">Kayıtlar <span id="recinfo" style="color:#8c8c8c"></span></div>
+    <div id="recs"></div>
     <div class="lbl">Telefondan gönder</div>
     <input id="link" type="url" placeholder="Link yapıştır (YouTube, video, site)" autocomplete="off" enterkeyhint="go">
     <div class="grid2" style="margin-top:8px"><button id="linkgo" style="background:var(--acc);font-weight:650">Linki aç</button><button id="pickb">Video / foto seç</button></div>
@@ -601,6 +606,21 @@ function state(){fetch('/state').then(r=>r.json()).then(s=>{ST=s;$('#dot').class
   if(s.via_router&&!DEV&&!askedName){askedName=true;openSheet('more');setTimeout(()=>{$('#devname').focus();toast('Bu telefona bir ad ver: VPN üzerinden herkes aynı görünüyor')},300)}})
   .catch(()=>{$('#dot').classList.remove('on');$('#now').textContent='TV\'ye ulaşılamıyor'})}
 lockH();state();setInterval(()=>{if(!document.hidden)state()},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)state()});
+</script>
+<script>
+// Scheduled recordings + sleep timer status (server: /sched/list). Sheet rows are rebuilt only on change.
+let _recsig='';
+async function loadRecs(){try{const d=await (await fetch('/sched/list')).json();
+  const sig=JSON.stringify(d);if(sig===_recsig)return;_recsig=sig;
+  $('sleepinfo').textContent=d.sleep_left?'kapanıyor: '+Math.ceil(d.sleep_left/60)+' dk':'';
+  $('recinfo').textContent=d.files.length?(d.files.length+' dosya · sınır '+d.cap_gb+' GB'):'';
+  const el=$('recs');el.innerHTML='';
+  const row=(a,b)=>{const g=document.createElement('div');g.className='grid2';g.style.marginTop='6px';
+    for(const [t,f] of [a,b]){const x=document.createElement('button');x.textContent=t;x.onclick=f;g.appendChild(x)}el.appendChild(g)};
+  d.recordings.forEach(x=>row(['● '+x.title.slice(0,28)+' ('+x.state+')',()=>{}],['İptal',()=>post('/sched/rec/cancel?id='+encodeURIComponent(x.id))]));
+  d.files.forEach(f=>row(['▶ '+f.name.slice(0,30)+' ('+f.mb+' MB)',()=>post('/rec/play?f='+encodeURIComponent(f.name))],['Sil',()=>{if(confirm('Kayıt silinsin mi?'))post('/rec/del?f='+encodeURIComponent(f.name))}]));
+}catch(e){}}
+setTimeout(loadRecs,1500);setInterval(loadRecs,15000);
 </script>
 </body>
 </html>

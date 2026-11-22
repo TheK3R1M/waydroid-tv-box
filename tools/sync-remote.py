@@ -48,6 +48,8 @@ def write_file(s_path, d_path):
 n = 0
 # 1) server + UI
 PAIRS = {"server/tv-remote.py": "files/usr/local/bin/tv-remote.py",
+         "server/tvsched.py": "files/usr/local/bin/tvsched.py",
+         "server/tv-rec.py": "files/usr/local/bin/tv-rec.py",
          "ui/index.html": "files/usr/local/share/tv-remote/index.html"}
 for s, d in PAIRS.items():
     write_file(os.path.join(src, s), os.path.join(kit, d)); n += 1

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-22 (zapping + scheduling)
+- **Zapping latency:** channel changes run on one latest-wins worker; the remote/HTTP call returns at once, superseded presses never load, first-frame poll 0.1 s, unchanged mpv properties are not re-sent (fewer IPC round trips). Every change is timed in `/var/log/tv-zap.log` (lock / resolve / cache / load / frame).
+- **Scheduling (new `tvsched.py` + `tv-rec.py`):** OK on a future programme in the on-TV guide = reminder (toast 1 min before; switches by itself only if "otomatik geç" is on, else OK switches); MENU on a future programme = scheduled recording (`systemd-run --on-calendar`, ffmpeg `-c copy`, 2 min before to 5 min after, disk cap 20 GB, oldest deleted); MENU held = sleep timer 30/60/90/120/off (stops live TV, screen off, warning 1 min before); phone "Diğer" sheet has the sleep buttons and the recordings list (play / delete / cancel).
+- **On-TV list layout:** rows 76 px apart, highlight bar holds the name and the EPG line; watching tag and favourite star inside the bar; guide marks on the programme line. `tools/render_overlay.py` renders the real overlay over a test frame for visual checks.
+- Tests: `tools/test_sched.py` (scheduler, guide keys, zap coalescing, timing log).
+
 ## 2026-11-22 (live TV)
 - **Live TV:** timeshift (physical LEFT/RIGHT -10/+10 s in single channel, phone ⏪10 · Canlı · ⏩30); on-TV list PageUp/Down = 10 rows and group jump; held-key acceleration; neighbour HLS prefetch; zap time logged in ms.
 - **EPG:** `tv-epg.py` daily XMLTV (public iptv-epg.org feed) -> now/next on the remote and the on-TV banner, phone guide grid (-1 h .. +6 h). Coverage on a real Turkish list: about 19 % of curated channels (most local channels are not in the public guide).

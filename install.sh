@@ -47,7 +47,7 @@ FILES_core="etc/tv/env etc/tv/weston.ini etc/systemd/logind.conf.d/10-tv-no-powe
  etc/systemd/system/tv-weston-watch.service var/lib/waydroid/waydroid_base.prop"
 FILES_wireless="etc/modprobe.d/rtw89-stable.conf etc/systemd/system/wifi-watchdog.service usr/local/bin/wifi-watchdog.sh"
 FILES_remote="usr/local/bin/tv-vol-pin.sh etc/systemd/system/tv-vol-pin.service etc/systemd/system/tv-vol-pin.timer etc/systemd/system/tv-android.service.d/vol.conf
- usr/local/bin/tv-remote.py usr/local/share/tv-remote/index.html etc/systemd/system/tv-remote.service
+ usr/local/bin/tv-remote.py usr/local/share/tv-remote/index.html etc/systemd/system/tv-remote.service usr/local/bin/tvsched.py usr/local/bin/tv-rec.py
  usr/local/bin/tv-remote-restart-when-idle.sh usr/local/bin/tv-adb-lan.sh etc/systemd/system/tv-android.service.d/adb.conf
  usr/local/bin/tv-intent.py usr/local/bin/tv-fix.sh usr/local/bin/tv-why.py usr/local/bin/tv-blackbox.py
  etc/systemd/system/tv-blackbox.service usr/local/bin/tv-hdmi-stream
