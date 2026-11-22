@@ -23,8 +23,8 @@ WATCH = []          # apps that get quarantined on an anomaly
 UPLOAD_MBIT = 15
 MAX_CONN, MAX_DST = 1500, 250
 DATA = "/root/.local/share/waydroid/data"
-# ELF files that are known and expected (checked by hand): NETFLY's 360-Jiagu packer libs, byte-identical to the
-# copies inside the APK . Anything else that appears is still treated as an anomaly.
+# ELF files that are known and expected (checked by hand): vendor packer libs, byte-identical to the
+# copies inside the APK (packer assets). Anything else that appears is still treated as an anomaly.
 ELF_ALLOW = {
     "5653c9f2d92a77fbeaeb0685e4e865edb1cdf51cac1564ba6e92b853884648a4",
     "30b7ecf0a8df7bf5f9e2b104e6a0584f7b6fad1b658cbe349d1076c72959ffe8",

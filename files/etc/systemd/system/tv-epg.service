@@ -1,0 +1,9 @@
+[Unit]
+Description=TV guide (EPG) for the remote: XMLTV -> /var/lib/tv-epg/now.json
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/tv-epg.py
+Nice=10

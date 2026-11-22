@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily TV guide refresh (04:10) and 3 min after boot
+
+[Timer]
+OnCalendar=*-*-* 04:10:00
+OnBootSec=3min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

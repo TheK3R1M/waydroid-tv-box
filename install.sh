@@ -49,7 +49,8 @@ FILES_wireless="etc/modprobe.d/rtw89-stable.conf etc/systemd/system/wifi-watchdo
 FILES_remote="usr/local/bin/tv-remote.py usr/local/share/tv-remote/index.html etc/systemd/system/tv-remote.service
  usr/local/bin/tv-remote-restart-when-idle.sh usr/local/bin/tv-adb-lan.sh etc/systemd/system/tv-android.service.d/adb.conf
  usr/local/bin/tv-intent.py usr/local/bin/tv-fix.sh usr/local/bin/tv-why.py usr/local/bin/tv-blackbox.py
- etc/systemd/system/tv-blackbox.service usr/local/bin/tv-hdmi-stream"
+ etc/systemd/system/tv-blackbox.service usr/local/bin/tv-hdmi-stream
+ usr/local/bin/tv-epg.py etc/systemd/system/tv-epg.service etc/systemd/system/tv-epg.timer"
 FILES_live_tv="usr/local/bin/tv-channels.py usr/local/bin/tv-channels-extra.py
  etc/systemd/system/tv-channels-extra.service etc/systemd/system/tv-channels-extra.timer"
 FILES_voice="usr/local/bin/tv-voice.py usr/local/bin/tv-nlu.py usr/local/bin/tv-understand.py

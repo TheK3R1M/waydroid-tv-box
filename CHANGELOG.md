@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-22 (live TV)
+- **Live TV:** timeshift (physical LEFT/RIGHT -10/+10 s in single channel, phone ⏪10 · Canlı · ⏩30); on-TV list PageUp/Down = 10 rows and group jump; held-key acceleration; neighbour HLS prefetch; zap time logged in ms.
+- **EPG:** `tv-epg.py` daily XMLTV (public iptv-epg.org feed) -> now/next on the remote and the on-TV banner, phone guide grid (-1 h .. +6 h). Coverage on a real Turkish list: about 19 % of curated channels (most local channels are not in the public guide).
+- **i18n:** `LANG` in /etc/tv/env (en default); page + server OSD have en/tr tables.
+- Offline tests: `tools/test_server.py`, `tools/test_epg.py`.
+
 ## 2026-11-22
 - **TV Klavye 4.0.1:** `org.tvbox.klavye.SET` is a manifest receiver (`SetRx`, permission DUMP), so options apply before the keyboard was ever shown. Keyboard sources synced from the live tree.
 - **Installer:** `install.sh` modular one-command installer (core, remote, live-tv, voice, keyboard, guard, backup), `--dry-run`, `--uninstall <module>`, per-module verify. Dry-run + verify tested on the reference box (all modules PASS). Fixed: module names with `-` (live-tv) broke the file lists.
