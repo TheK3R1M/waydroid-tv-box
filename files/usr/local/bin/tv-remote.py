@@ -933,6 +933,40 @@ def _split_watch():
 threading.Thread(target=_split_watch, daemon=True).start()
 
 
+def _android_gen():
+    """(state, start stamp) of the Android session unit; the stamp changes on every (re)start."""
+    try:
+        r = subprocess.run(["systemctl", "show", "tv-android", "-p", "ActiveState", "-p", "ActiveEnterTimestampMonotonic"],
+                           capture_output=True, text=True, timeout=5).stdout
+        d = dict(l.split("=", 1) for l in r.splitlines() if "=" in l)
+        return d.get("ActiveState", ""), d.get("ActiveEnterTimestampMonotonic", "")
+    except Exception:
+        return None
+
+
+def _android_watch():
+    """Live TV is a host mpv window ON TOP of Android, not an Android app. When Android restarts (heal / TV'yi
+    düzelt / crash) the player kept playing behind the fresh home screen: channel audio over the launcher
+    (2026-11-27). Kerim's choice: an Android restart closes the channel, the home screen comes back."""
+    last = _android_gen()
+    while True:
+        time.sleep(3)
+        cur = _android_gen()
+        if cur is None or last is None:
+            last = cur if cur is not None else last
+            continue
+        restarted = cur[1] != last[1] or (cur[0] != "active" and last[0] == "active")
+        last = cur
+        if restarted and (_split["on"] or mpv_alive()):
+            with _split["lock"]:
+                _split["on"] = False
+                mpv_stop(home=False)
+            log_action("127.0.0.1", "Android yeniden başladı → açık kanal kapatıldı (arkada ses kalmasın)")
+
+
+threading.Thread(target=_android_watch, daemon=True).start()
+
+
 # ---- Programme scheduling (server/tvsched.py): reminders (OK on a future programme), sleep timer (MENU hold or
 # phone), scheduled recordings (transient systemd units running tv-rec.py, so they survive a tv-remote restart).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # tvsched.py sits next to this file
@@ -3172,7 +3206,7 @@ _BRIDGE_KEYS = {"KEY_UP": "/key/up", "KEY_DOWN": "/key/down", "KEY_LEFT": "/key/
                 "KEY_ENTER": "/key/ok", "KEY_KPENTER": "/key/ok", "KEY_SELECT": "/key/ok",
                 "KEY_BACK": "/key/back", "KEY_ESC": "/key/back", "KEY_HOMEPAGE": "/key/home",
                 "KEY_PAGEUP": "/ch/prev", "KEY_PAGEDOWN": "/ch/next",          # same direction as the list on screen
-                "KEY_CHANNELUP": "/ch/prev", "KEY_CHANNELDOWN": "/ch/next", "KEY_COMPOSE": "/fav/cur",
+                "KEY_CHANNELUP": "/ch/next", "KEY_CHANNELDOWN": "/ch/prev", "KEY_COMPOSE": "/fav/cur",   # CH+ = number +1
                 "KEY_VOLUMEUP": "/vol/up", "KEY_VOLUMEDOWN": "/vol/down", "KEY_MUTE": "/vol/mute"}
 _REPEAT_OK = {"/vol/up", "/vol/down"}       # held volume repeats freely
 _REPEAT_STEP = {"/key/up", "/key/down", "/key/left", "/key/right", "/ch/next", "/ch/prev"}   # held: 1 step / 0.25 s
@@ -3610,7 +3644,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 ui_list_open(); ok = True
             elif parts[1] in ("up", "down") and chs:
                 sd = _split["side"] if _split["mode"] == "split" else "left"
-                i = step_idx(base_idx(sd), -1 if parts[1] == "up" else 1)   # ▲ = up the list (towards no. 1), like the phone list
+                i = step_idx(base_idx(sd), 1 if parts[1] == "up" else -1)   # ▲ = channel number +1 like a normal TV (Kerim's dad)
                 _want[sd] = i; _ch["i"] = i
                 log_action(ip, f"kanal {chs[i][0]}")
                 ok = split_set(("ch", i), sd)

@@ -20,10 +20,18 @@ fi
 N=$(waydroid shell -- logcat -d -b main,system 2>/dev/null | grep -c "failed to attach")
 O=$(cat $ST 2>/dev/null || echo 0)
 echo $N > $ST
-if [ "$N" -gt "$O" ]; then
+# A single failure is often a one-off (one app slow to start) -> do not restart Android for it.
+# Restart only for >=2 new failures at once, or a 2nd failure within 10 min of a first one.
+PEND=/run/tv-heal.pending
+D=$(( N - O ))
+[ -f $PEND ] && [ $(( $(date +%s) - $(stat -c %Y $PEND) )) -gt 600 ] && rm -f $PEND
+if [ "$D" -ge 2 ] || { [ "$D" -ge 1 ] && [ -f $PEND ]; }; then
   logger -t tv-heal "Android process attach failures ($O -> $N), restarting tv-android"
-  echo 0 > $ST
+  echo 0 > $ST; rm -f $PEND
   systemctl restart tv-android
+elif [ "$D" -ge 1 ]; then
+  logger -t tv-heal "single attach failure ($O -> $N), waiting for a 2nd within 10 min before restarting"
+  touch $PEND
 fi
 
 # Ensure SW video decode (VA-API copy path on Raven2 = ~6-16 fps, stalls)
