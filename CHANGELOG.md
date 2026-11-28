@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-28 (browser remote + restart fix)
+- **Firefox D-pad navigation:** local userscript (`android/firefox/tv-dpad-nav.user.js`, runs in Violentmonkey) moves a blue frame between links, buttons and fields with the arrow keys; OK clicks; scrolls when nothing is left in that direction. No network access. Turkish pages: *Never translate Turkish* so the translate sheet does not steal the keys.
+- **Live TV closes when Android restarts:** the remote watches `tv-android`'s start stamp and stops the host player, so no channel audio keeps playing behind the home screen.
+
 ## 2026-11-22 (options menu + zap watchdog)
 - **MENU = options panel** (TV-style, right side, live TV only): channel context (favourite, programme guide, channel list, split screen, sound side, sleep timer with value, recordings, settings); guide context (remind, record, go to channel); Settings (auto switch for reminders, browse favourites only, language, reload channel list); Recordings (play / delete). Long OK still toggles the favourite. Hold-MENU no longer cycles the sleep timer.
 - **Channel list navigation:** LEFT from any row jumps to the category tabs; tab change updates the list live; DOWN/OK returns to the remembered row; opens on the playing channel; last tab remembered; PageUp/PageDown 10 rows.
