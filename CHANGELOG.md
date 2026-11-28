@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2026-11-28 (browser remote + restart fix)
+- **Firefox D-pad 1.1.0:** embedded video players (cross-site iframes) can be entered with OK and driven with the arrows; play button first, hidden controls woken up, left/right seek on the video, edge/Back leaves the player.
 - **Firefox D-pad navigation:** local userscript (`android/firefox/tv-dpad-nav.user.js`, runs in Violentmonkey) moves a blue frame between links, buttons and fields with the arrow keys; OK clicks; scrolls when nothing is left in that direction. No network access. Turkish pages: *Never translate Turkish* so the translate sheet does not steal the keys.
 - **Live TV closes when Android restarts:** the remote watches `tv-android`'s start stamp and stops the host player, so no channel audio keeps playing behind the home screen.
 

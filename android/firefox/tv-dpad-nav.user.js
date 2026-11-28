@@ -1,16 +1,18 @@
 // ==UserScript==
 // @name         TV D-pad navigation
 // @namespace    waydroid-tv-box
-// @version      1.0.0
+// @version      1.1.0
 // @description  Move between links, buttons and fields with the remote's arrow keys (grid-like), OK clicks. Runs fully local: no network, no data leaves the page.
 // @match        *://*/*
 // @run-at       document-idle
-// @noframes
 // @grant        none
 // ==/UserScript==
 (() => {
   "use strict";
   if (window.__tvNav) return;
+  const TOP = window === window.top;
+  // Inside a frame: only frames big enough to be a player/content (skip ad/tracking pixels).
+  if (!TOP && (innerWidth < 160 || innerHeight < 100)) return;
   window.__tvNav = true;
 
   // Sites that already have their own TV remote navigation: leave them alone.
@@ -22,7 +24,7 @@
     "a[href]", "button", "input:not([type=hidden])", "select", "textarea", "summary",
     "[tabindex]:not([tabindex='-1'])", "[role=button]", "[role=link]", "[role=tab]", "[role=menuitem]",
     "[role=option]", "[role=checkbox]", "[role=switch]", "[onclick]", "[contenteditable=''], [contenteditable=true]",
-    "video[controls]", "audio[controls]",
+    "video", "audio[controls]", "iframe", "embed", "object",
   ].join(",");
 
   const css = document.createElement("style");
@@ -55,6 +57,8 @@
     const s = getComputedStyle(el);
     if (s.visibility === "hidden" || s.display === "none" || +s.opacity === 0 || s.pointerEvents === "none") return null;
     if (el.disabled || el.closest("[aria-hidden=true], [inert]")) return null;
+    if (/^(IFRAME|EMBED|OBJECT)$/.test(el.tagName) && (r.width < 160 || r.height < 100)) return null;
+    if (/^(VIDEO|IFRAME|EMBED|OBJECT)$/.test(el.tagName)) return r;   // players put click layers on top of them
     if (!/^(INPUT|SELECT|TEXTAREA|VIDEO|AUDIO)$/.test(el.tagName) && !el.textContent.trim() &&
         !el.getAttribute("aria-label") && !el.title && !el.querySelector("img, svg, picture, canvas, [style*=background]") &&
         getComputedStyle(el).backgroundImage === "none") return null;     // empty helper elements
@@ -138,11 +142,15 @@
     cur = el;
     el.classList.add("tvnav-focus");
     wake();
+    if (/^(IFRAME|EMBED|OBJECT)$/.test(el.tagName)) hint("OK: oynatıcıya gir");
     // Text fields are only highlighted: focusing them would pop up the on-screen keyboard while just passing by.
     // OK focuses them. Leaving a field closes the keyboard.
     const a = document.activeElement;
     if (isText(el)) { if (a && a !== document.body && a !== el) try { a.blur(); } catch (e) {} }
-    else try { el.focus({ preventScroll: true }); } catch (e) {}
+    else if (!/^(IFRAME|EMBED|OBJECT)$/.test(el.tagName)) try { el.focus({ preventScroll: true }); } catch (e) {}
+    // not focusable (div play button) or a frame: drop the old focus, else the next key starts from there
+    if (!isText(el) && document.activeElement !== el && document.activeElement && document.activeElement !== document.body)
+      try { document.activeElement.blur(); } catch (e) {}
     r = r || el.getBoundingClientRect();
     const m = 80;
     if (r.top < m || r.bottom > innerHeight - m || r.left < 0 || r.right > innerWidth)
@@ -152,13 +160,84 @@
   const isText = (el) => el && (el.isContentEditable || el.tagName === "TEXTAREA" ||
     (el.tagName === "INPUT" && !/^(button|submit|reset|checkbox|radio|range|color|file|image)$/.test(el.type)));
 
-  function move(dir) {
+  // ---- video players -------------------------------------------------------------------------------
+  // Players hide their controls until the mouse moves; a fake mousemove over the video brings them back.
+  const videos = () => [...document.querySelectorAll("video")].filter((v) => { const r = v.getBoundingClientRect(); return r.width > 160 && r.height > 90; });
+  function poke() {
+    let any = false;
+    for (const v of videos()) {
+      const r = v.getBoundingClientRect();
+      const x = Math.min(Math.max(r.left + r.width / 2, 1), innerWidth - 1), y = Math.min(Math.max(r.top + r.height * 0.6, 1), innerHeight - 1);
+      const t = document.elementFromPoint(x, y) || v;
+      for (const type of ["pointermove", "mousemove", "mouseover"])
+        t.dispatchEvent(new (type.startsWith("pointer") ? PointerEvent : MouseEvent)(type, { bubbles: true, clientX: x, clientY: y, view: window }));
+      any = true;
+    }
+    return any;
+  }
+  const isPlayish = (el) => /play|başlat|oynat/i.test([el.getAttribute("aria-label"), el.title, el.className && el.className.baseVal === undefined ? el.className : "", el.id].join(" "));
+  function startEl(list) {      // entering a page/frame with a player: the big play button first, else the video
+    const on = list.filter((c) => c.r.bottom > 0 && c.r.top < innerHeight);
+    const play = on.filter((c) => isPlayish(c.el) && c.el.tagName !== "VIDEO").sort((a, b) => b.r.width * b.r.height - a.r.width * a.r.height)[0];
+    return play || on.find((c) => c.el.tagName === "VIDEO") || null;
+  }
+
+  // ---- frames (players are usually an <iframe> from another site) ------------------------------------
+  // The script runs in every frame. OK on a frame hands the remote to it; at its edge it hands back.
+  const MSG = "__tvnav";
+  let inFrame = null;           // parent side: the frame that currently has the remote
+  function enterFrame(fr, dir) {
+    inFrame = fr;
+    if (ring) ring.style.display = "none";
+    try { fr.focus(); } catch (e) {}
+    try { fr.contentWindow.postMessage({ [MSG]: "enter", dir }, "*"); } catch (e) {}
+    // no answer = the script does not run in that frame (sandboxed/blocked): take the remote back
+    clearTimeout(ackT);
+    ackT = setTimeout(() => {
+      if (inFrame !== fr) return;
+      inFrame = null; try { fr.blur(); } catch (e) {} window.focus(); setCur(fr);
+      hint("Bu oynatıcı kumandayla kullanılamıyor");
+    }, 700);
+  }
+  let ackT = 0;
+  function leaveFrame(dir) {    // child side
+    if (cur) cur.classList.remove("tvnav-focus");
+    cur = null; if (ring) ring.style.display = "none";
+    window.parent.postMessage({ [MSG]: "exit", dir }, "*");
+  }
+  addEventListener("message", (e) => {
+    const d = e.data;
+    if (!d || typeof d !== "object" || !d[MSG]) return;
+    if (d[MSG] === "ack") { clearTimeout(ackT); return; }
+    if (d[MSG] === "enter" && e.source === window.parent) {
+      window.parent.postMessage({ [MSG]: "ack" }, "*");
+      setTimeout(() => {
+        poke();
+        setTimeout(() => {
+          const list = candidates(), s = startEl(list);
+          if (s) setCur(s.el, s.r); else move(d.dir || "down", true);
+        }, 150);
+      }, 0);
+    }
+    if (d[MSG] === "exit") {
+      const fr = [...document.querySelectorAll("iframe, embed, object")].find((f) => { try { return f.contentWindow === e.source; } catch (x) { return false; } });
+      if (!fr) return;
+      inFrame = null; cur = fr;
+      const p = d.dir && best(fr.getBoundingClientRect(), d.dir, candidates().filter((c) => c.el !== fr));
+      if (p) setCur(p.el, p.r);
+      else { try { fr.blur(); } catch (x) {} window.focus(); setCur(fr); hint("Oynatıcıdan çıkıldı"); }
+    }
+  });
+
+  function move(dir, entering) {
     const list = candidates().filter((c) => c.el !== cur);
     const alive = cur && document.contains(cur) && visible(cur, true);
     if (!alive) {
       // start at the top-left-most element on screen
       const on = list.filter((c) => c.r.bottom > 0 && c.r.top < innerHeight);
-      if (!on.length) return scroll(dir);
+      if (!on.length) return TOP || entering ? scroll(dir) : leaveFrame(dir);
+      const s0 = startEl(on);
+      if (s0 && !TOP) return setCur(s0.el, s0.r);
       list.length = 0; list.push(...on);
       list.sort((a, b) => (a.r.top - b.r.top) || (a.r.left - b.r.left));
       const first = dir === "up" ? list[list.length - 1] : list[0];
@@ -166,6 +245,11 @@
     }
     const p = best(cur.getBoundingClientRect(), dir, list);
     if (p) return setCur(p.el, p.r);
+    if (!TOP) {                 // frame edge: scroll the frame if it can, else back to the page
+      const dy = dir === "down" ? 1 : dir === "up" ? -1 : 0, se = document.scrollingElement;
+      if (se && dy && (dy > 0 ? se.scrollTop + innerHeight < se.scrollHeight - 2 : se.scrollTop > 0)) return scroll(dir);
+      return leaveFrame(dir);
+    }
     scroll(dir);
   }
 
@@ -177,6 +261,16 @@
   }
 
   function activate(el) {
+    if (/^(IFRAME|EMBED|OBJECT)$/.test(el.tagName)) return enterFrame(el, "down");
+    if (el.tagName === "VIDEO") {
+      // a click layer usually sits on the video: click what is on top (the player's own toggle), else toggle ourselves
+      const r = el.getBoundingClientRect(), t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      const was = el.paused;
+      if (t && t !== el) t.click();
+      setTimeout(() => { if (el.paused === was) { if (was) el.play().catch(() => {}); else el.pause(); } }, 250);
+      poke();
+      return;
+    }
     if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable) {
       el.focus();
       if (el.tagName === "SELECT" && el.showPicker) try { el.showPicker(); } catch (e) {}
@@ -189,6 +283,19 @@
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
     const a = document.activeElement;
     const dir = DIRS[e.key];
+    if (!TOP && (e.key === "Escape" || e.key === "GoBack" || e.key === "BrowserBack")) {
+      e.preventDefault(); e.stopPropagation(); return leaveFrame(null);
+    }
+    if (dir && videos().length && poke() && !cur) {         // controls were hidden: let them appear first
+      e.preventDefault(); e.stopPropagation();
+      setTimeout(() => move(dir), 150); return;
+    }
+    if (dir && cur && cur.tagName === "VIDEO" && (dir === "left" || dir === "right") && isFinite(cur.duration)) {
+      e.preventDefault(); e.stopPropagation();             // on the video: left/right = -/+10 s
+      cur.currentTime = Math.max(0, cur.currentTime + (dir === "left" ? -10 : 10)); poke();
+      const m = Math.floor(cur.currentTime / 60), sec = Math.floor(cur.currentTime % 60);
+      return hint((dir === "left" ? "−10 sn  " : "+10 sn  ") + m + ":" + String(sec).padStart(2, "0"));
+    }
     if (dir) {
       if (isText(a)) {
         // inside a text field: up/down leave it, left/right move the caret until the edge

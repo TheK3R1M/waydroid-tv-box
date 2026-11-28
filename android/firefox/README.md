@@ -29,5 +29,9 @@ $A reverse --remove tcp:8765
 3. Turkish pages pop up Firefox's "Translate this page?" sheet, which steals the arrow keys. Open any Turkish
    page, tap the translate icon in the toolbar, then *Translation options* and switch on **Never translate Turkish**.
 
+Video players (film sites embed them as an `<iframe>` from another site): the frame is one stop; **OK enters
+the player** (big play button first, hidden controls are woken up), arrows move inside it, on the video itself
+left/right = -/+10 s, and moving past its edge or Back returns to the page.
+
 Check: open a news site, press DOWN a few times: a blue frame moves over the headlines; OK opens one. ✅
 (tested 2026-11-28 on ntv.com.tr and trthaber.com, Firefox 160)
